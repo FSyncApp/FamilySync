@@ -1,0 +1,8 @@
+{
+  "ios": {
+    "bundleIdentifier": "com.fsync.familysync"
+  },
+  "android": {
+    "package": "com.fsync.familysync"
+  }
+}
