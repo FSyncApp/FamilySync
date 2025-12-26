@@ -78,6 +78,20 @@ pnpm-debug.log*
 _archive/
 app-example
 
+# pnpm
+pnpm-debug.log*
+
+# iOS / Xcode noise
+ios/*.xcuserstate
+ios/**/xcuserdata/
+ios/.xcode.env*.local
+ios/*.lock
+ios/* 2*/
+ios/* 2.xcworkspace/
+
+# macOS junk
+**/.DS_Store
+
 # accidental duplicates
 ios/* 2*
 ios/Podfile 2.lock
