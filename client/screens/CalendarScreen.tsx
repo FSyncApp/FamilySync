@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import {
   Alert,
+  Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -10,15 +11,45 @@ import {
 } from "react-native";
 
 /**
- * Calendar v1.1 (Phase 1 thin slice)
- * - Adds Month Header (prev/next month + Today)
- * - Adds View Toggle placeholder (Month "Coming soon", Week "current")
- * - Keeps week strip + selected-day focus / empty agenda area
- * - No date picker usage (canonical DatePickerModal remains the only picker when needed later)
- * - No data wiring
+ * Calendar v1.3 (Phase 1 thin slice)
+ * - Calendar v1.2.1 + TimeTree-style "tap item -> details" loop
+ *   - Dev-only demo items (so the UX is visible immediately)
+ *   - Tapping an item opens a calm Details Modal (no navigation stack changes)
+ * - Month arrows: move by month
+ * - Week arrows: move by week
+ * - No data wiring (Supabase untouched)
+ * - No date picker usage
  */
 
 const WEEK_STARTS_ON_MONDAY = true;
+
+type ItemKind = "allDay" | "scheduled" | "task";
+
+type BaseItem = {
+  id: string;
+  kind: ItemKind;
+  title: string;
+  subtitle?: string;
+  sourceLabel?: string; // future: imported/school/user
+  colorLabel?: string;  // future: palette/locked sources
+  notes?: string;
+};
+
+type AllDayItem = BaseItem & {
+  kind: "allDay";
+};
+
+type ScheduledItem = BaseItem & {
+  kind: "scheduled";
+  timeLabel: string; // e.g. "15:20"
+  endTimeLabel?: string; // optional
+};
+
+type TaskItem = BaseItem & {
+  kind: "task";
+};
+
+type AnyItem = AllDayItem | ScheduledItem | TaskItem;
 
 function pad2(n: number) {
   return n < 10 ? `0${n}` : `${n}`;
@@ -45,7 +76,6 @@ function addDays(d: Date, days: number) {
 }
 
 function addMonthsClamp(d: Date, deltaMonths: number) {
-  // Keep the day-of-month when possible; clamp to last day if needed.
   const year = d.getFullYear();
   const month = d.getMonth();
   const day = d.getDate();
@@ -67,32 +97,90 @@ function startOfWeek(d: Date) {
   const x = startOfDay(d);
   const day = x.getDay(); // 0 Sun .. 6 Sat
   const mondayBasedIndex = (day + 6) % 7; // 0 Mon .. 6 Sun
-
   const offset = WEEK_STARTS_ON_MONDAY ? -mondayBasedIndex : -day;
   return addDays(x, offset);
 }
 
 function formatMonthYear(d: Date) {
-  // Use built-in Intl (no extra deps)
   return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(d);
-}
-
-function formatDayHeader(d: Date, today: Date) {
-  if (isSameDay(d, today)) return "Today";
-  return new Intl.DateTimeFormat(undefined, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  }).format(d);
 }
 
 function formatShortWeekday(d: Date) {
   return new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(d);
 }
 
+function formatDayTitle(d: Date) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(d);
+}
+
+function formatDayShort(d: Date) {
+  // e.g. "Tue 16 Dec 2025"
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(d);
+}
+
+function safeLabel(value?: string, fallback = "None") {
+  if (!value) return fallback;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : fallback;
+}
+
 export default function CalendarScreen() {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [selectedDate, setSelectedDate] = useState<Date>(today);
+
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<AnyItem | null>(null);
+
+  // Dev-only demo items so the UX is visible immediately (Phase 1 thin).
+  const devItems = useMemo<AnyItem[]>(() => {
+    if (!__DEV__) return [];
+    return [
+      {
+        id: "demo-all-day-1",
+        kind: "allDay",
+        title: "Sophie birthday",
+        subtitle: "Card / gift",
+        sourceLabel: "FamilySync",
+        colorLabel: "Reserved",
+        notes: "",
+      },
+      {
+        id: "demo-scheduled-1",
+        kind: "scheduled",
+        timeLabel: "15:20",
+        endTimeLabel: "16:00",
+        title: "School pickup",
+        subtitle: "Main gate",
+        sourceLabel: "FamilySync",
+        colorLabel: "Reserved",
+        notes: "",
+      },
+      {
+        id: "demo-task-1",
+        kind: "task",
+        title: "Buy party clothes",
+        subtitle: "Before Friday",
+        sourceLabel: "FamilySync",
+        colorLabel: "Reserved",
+        notes: "",
+      },
+    ];
+  }, []);
+
+  const allDayItems = devItems.filter((i): i is AllDayItem => i.kind === "allDay");
+  const scheduledItems = devItems.filter((i): i is ScheduledItem => i.kind === "scheduled");
+  const taskItems = devItems.filter((i): i is TaskItem => i.kind === "task");
+
+  const itemCount = allDayItems.length + scheduledItems.length + taskItems.length;
 
   const weekStart = useMemo(() => startOfWeek(selectedDate), [selectedDate]);
   const weekDays = useMemo(() => {
@@ -113,8 +201,27 @@ export default function CalendarScreen() {
     setSelectedDate((prev) => startOfDay(addMonthsClamp(prev, 1)));
   }
 
+  function goPrevWeek() {
+    setSelectedDate((prev) => startOfDay(addDays(prev, -7)));
+  }
+
+  function goNextWeek() {
+    setSelectedDate((prev) => startOfDay(addDays(prev, 7)));
+  }
+
   function onPressMonthMode() {
     Alert.alert("Coming soon", "Month view will be added in a later phase.");
+  }
+
+  function openDetails(item: AnyItem) {
+    setSelectedItem(item);
+    setDetailsOpen(true);
+  }
+
+  function closeDetails() {
+    setDetailsOpen(false);
+    // Keep selectedItem to avoid flicker during closing animation; clear after.
+    setTimeout(() => setSelectedItem(null), 200);
   }
 
   return (
@@ -144,6 +251,7 @@ export default function CalendarScreen() {
           </Pressable>
         </View>
 
+        {/* Mode + Today */}
         <View style={styles.modeRow}>
           <View style={styles.modePill}>
             <Pressable
@@ -174,49 +282,214 @@ export default function CalendarScreen() {
           </Pressable>
         </View>
 
-        {/* Weekly strip (kept) */}
-        <View style={styles.weekStrip}>
-          {weekDays.map((d) => {
-            const isSelected = isSameDay(d, selectedDate);
-            const isToday = isSameDay(d, today);
+        {/* Week navigation + Weekly strip */}
+        <View style={styles.weekRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Previous week"
+            onPress={goPrevWeek}
+            style={({ pressed }) => [styles.weekNavBtn, pressed && styles.pressed]}
+          >
+            <Text style={styles.weekNavText}>‹</Text>
+          </Pressable>
 
-            return (
-              <Pressable
-                key={`${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`}
-                onPress={() => setSelectedDate(startOfDay(d))}
-                style={({ pressed }) => [
-                  styles.dayCell,
-                  isSelected && styles.dayCellSelected,
-                  pressed && styles.pressed,
-                ]}
-                accessibilityRole="button"
-                accessibilityLabel={`Select ${d.toDateString()}`}
-              >
-                <Text style={[styles.dayDow, isSelected && styles.dayTextSelected]}>
-                  {formatShortWeekday(d)}
-                </Text>
-                <Text style={[styles.dayNum, isSelected && styles.dayTextSelected]}>
-                  {d.getDate()}
-                </Text>
-                {isToday ? <View style={[styles.todayDot, isSelected && styles.todayDotSelected]} /> : <View style={styles.todayDotPlaceholder} />}
-              </Pressable>
-            );
-          })}
+          <View style={styles.weekStrip}>
+            {weekDays.map((d) => {
+              const isSelected = isSameDay(d, selectedDate);
+              const isToday = isSameDay(d, today);
+
+              return (
+                <Pressable
+                  key={`${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`}
+                  onPress={() => setSelectedDate(startOfDay(d))}
+                  style={({ pressed }) => [
+                    styles.dayCell,
+                    isSelected && styles.dayCellSelected,
+                    pressed && styles.pressed,
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Select ${d.toDateString()}`}
+                >
+                  <Text style={[styles.dayDow, isSelected && styles.dayTextSelected]}>
+                    {formatShortWeekday(d)}
+                  </Text>
+                  <Text style={[styles.dayNum, isSelected && styles.dayTextSelected]}>
+                    {d.getDate()}
+                  </Text>
+                  {isToday ? (
+                    <View style={[styles.todayDot, isSelected && styles.todayDotSelected]} />
+                  ) : (
+                    <View style={styles.todayDotPlaceholder} />
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Next week"
+            onPress={goNextWeek}
+            style={({ pressed }) => [styles.weekNavBtn, pressed && styles.pressed]}
+          >
+            <Text style={styles.weekNavText}>›</Text>
+          </Pressable>
         </View>
 
-        {/* Selected day focus + agenda empty state */}
-        <View style={styles.agendaCard}>
-          <Text style={styles.agendaTitle}>{formatDayHeader(selectedDate, today)}</Text>
+        {/* Day Sheet (TimeTree-style) */}
+        <View style={styles.daySheet}>
+          <View style={styles.daySheetHeader}>
+            <Text style={styles.dayTitle}>{formatDayTitle(selectedDate)}</Text>
+            <View style={styles.countPill}>
+              <Text style={styles.countPillText}>{itemCount} items</Text>
+            </View>
+          </View>
 
-          <View style={styles.divider} />
+          {/* All-day */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>All-day</Text>
+            {allDayItems.length === 0 ? (
+              <Text style={styles.emptyText}>No all-day items</Text>
+            ) : (
+              allDayItems.map((it) => (
+                <Pressable
+                  key={it.id}
+                  onPress={() => openDetails(it)}
+                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${it.title}`}
+                >
+                  <View style={styles.sourceBar} />
+                  <View style={styles.rowMain}>
+                    <Text style={styles.rowTitle}>{it.title}</Text>
+                    {!!it.subtitle && <Text style={styles.rowSub}>{it.subtitle}</Text>}
+                  </View>
+                </Pressable>
+              ))
+            )}
+          </View>
 
-          <Text style={styles.emptyTitle}>Nothing scheduled.</Text>
-          <Text style={styles.emptyBody}>
-            Events and reminders will appear here.
-          </Text>
+          <View style={styles.sectionDivider} />
+
+          {/* Scheduled */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Scheduled</Text>
+            {scheduledItems.length === 0 ? (
+              <Text style={styles.emptyText}>Nothing scheduled</Text>
+            ) : (
+              scheduledItems.map((it) => (
+                <Pressable
+                  key={it.id}
+                  onPress={() => openDetails(it)}
+                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${it.title}`}
+                >
+                  <Text style={styles.timeLabel}>{it.timeLabel}</Text>
+                  <View style={styles.rowMain}>
+                    <Text style={styles.rowTitle}>{it.title}</Text>
+                    {!!it.subtitle && <Text style={styles.rowSub}>{it.subtitle}</Text>}
+                  </View>
+                </Pressable>
+              ))
+            )}
+          </View>
+
+          <View style={styles.sectionDivider} />
+
+          {/* Tasks */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Tasks</Text>
+            {taskItems.length === 0 ? (
+              <Text style={styles.emptyText}>No tasks due</Text>
+            ) : (
+              taskItems.map((it) => (
+                <Pressable
+                  key={it.id}
+                  onPress={() => openDetails(it)}
+                  style={({ pressed }) => [styles.row, pressed && styles.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${it.title}`}
+                >
+                  <View style={styles.taskDot} />
+                  <View style={styles.rowMain}>
+                    <Text style={styles.rowTitle}>{it.title}</Text>
+                    {!!it.subtitle && <Text style={styles.rowSub}>{it.subtitle}</Text>}
+                  </View>
+                </Pressable>
+              ))
+            )}
+          </View>
         </View>
 
       </ScrollView>
+
+      {/* Details Modal */}
+      <Modal
+        visible={detailsOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeDetails}
+      >
+        <SafeAreaView style={styles.modalSafe}>
+          <View style={styles.modalHeader}>
+            <View style={{ flex: 1 }} />
+            <Pressable
+              onPress={closeDetails}
+              style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
+              <Text style={styles.doneBtnText}>Done</Text>
+            </Pressable>
+          </View>
+
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <Text style={styles.modalTitle}>{selectedItem?.title ?? ""}</Text>
+
+            <Text style={styles.modalMeta}>
+              {selectedItem
+                ? selectedItem.kind === "allDay"
+                  ? `${formatDayShort(selectedDate)} · All-day`
+                  : selectedItem.kind === "scheduled"
+                    ? `${formatDayShort(selectedDate)} · ${selectedItem.timeLabel}${selectedItem.endTimeLabel ? `–${selectedItem.endTimeLabel}` : ""}`
+                    : `${formatDayShort(selectedDate)} · Task (due)`
+                : ""}
+            </Text>
+
+            {!!selectedItem?.subtitle && (
+              <View style={styles.detailCard}>
+                <Text style={styles.detailLabel}>Subtitle</Text>
+                <Text style={styles.detailValue}>{selectedItem.subtitle}</Text>
+              </View>
+            )}
+
+            <View style={styles.detailCard}>
+              <Text style={styles.detailLabel}>Notes</Text>
+              <Text style={styles.detailValue}>{safeLabel(selectedItem?.notes, "None")}</Text>
+            </View>
+
+            <View style={styles.detailCard}>
+              <Text style={styles.detailLabel}>Reminder</Text>
+              <Text style={styles.detailValue}>None</Text>
+            </View>
+
+            <View style={styles.detailCard}>
+              <Text style={styles.detailLabel}>Source</Text>
+              <Text style={styles.detailValue}>{safeLabel(selectedItem?.sourceLabel, "FamilySync")}</Text>
+            </View>
+
+            <View style={styles.detailCard}>
+              <Text style={styles.detailLabel}>Color</Text>
+              <Text style={styles.detailValue}>{safeLabel(selectedItem?.colorLabel, "Reserved")}</Text>
+            </View>
+
+            <Text style={styles.modalFootnote}>
+              Phase 1 scaffold — editing and imports will be added later.
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -310,11 +583,32 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
+  weekRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 14,
+  },
+  weekNavBtn: {
+    width: 34,
+    height: 58,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F4F4F6",
+  },
+  weekNavText: {
+    fontSize: 22,
+    lineHeight: 22,
+    fontWeight: "800",
+    color: "#121214",
+  },
+
   weekStrip: {
+    flex: 1,
     flexDirection: "row",
     justifyContent: "space-between",
     gap: 8,
-    marginBottom: 14,
   },
   dayCell: {
     flex: 1,
@@ -359,29 +653,160 @@ const styles = StyleSheet.create({
     backgroundColor: "transparent",
   },
 
-  agendaCard: {
+  daySheet: {
     borderRadius: 18,
     backgroundColor: "#F7F7F9",
     padding: 16,
   },
-  agendaTitle: {
+  daySheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    gap: 12,
+  },
+  dayTitle: {
     fontSize: 18,
     fontWeight: "800",
+    flex: 1,
   },
-  divider: {
+  countPill: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  countPillText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#5F5F66",
+  },
+
+  section: {
+    marginTop: 4,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#5F5F66",
+    marginBottom: 8,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: "#7A7A83",
+    lineHeight: 20,
+    paddingBottom: 4,
+  },
+  sectionDivider: {
     height: 1,
     backgroundColor: "#E2E2E8",
-    marginVertical: 12,
+    marginVertical: 14,
   },
-  emptyTitle: {
+
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    marginBottom: 8,
+  },
+  sourceBar: {
+    width: 4,
+    height: 32,
+    borderRadius: 2,
+    backgroundColor: "#D9D9DE", // neutral placeholder; reserved colors later
+  },
+  timeLabel: {
+    width: 54,
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#5F5F66",
+  },
+  taskDot: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#D9D9DE",
+  },
+  rowMain: {
+    flex: 1,
+  },
+  rowTitle: {
     fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 6,
+    fontWeight: "800",
+    color: "#121214",
   },
-  emptyBody: {
+  rowSub: {
+    marginTop: 2,
+    fontSize: 13,
+    color: "#7A7A83",
+  },
+
+  // Modal
+  modalSafe: {
+    flex: 1,
+    backgroundColor: "#FFFFFF",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  doneBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: "#F4F4F6",
+  },
+  doneBtnText: {
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  modalContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  modalTitle: {
+    fontSize: 26,
+    fontWeight: "900",
+    letterSpacing: 0.2,
+    marginTop: 8,
+  },
+  modalMeta: {
+    marginTop: 10,
     fontSize: 14,
     color: "#5F5F66",
+    fontWeight: "700",
+  },
+  detailCard: {
+    marginTop: 14,
+    borderRadius: 16,
+    backgroundColor: "#F7F7F9",
+    padding: 14,
+  },
+  detailLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#5F5F66",
+    marginBottom: 6,
+  },
+  detailValue: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#121214",
     lineHeight: 20,
+  },
+  modalFootnote: {
+    marginTop: 18,
+    fontSize: 13,
+    color: "#7A7A83",
+    lineHeight: 18,
   },
 
   pressed: {
