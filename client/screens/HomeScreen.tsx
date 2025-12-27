@@ -71,21 +71,19 @@ export default function HomeScreen() {
     // Intentionally no navigation yet (Phase 1).
   };
 
-  const onShortcutPress = (item: ShortcutItem) => {
-    // Birthdays is a Root Stack screen (not a bottom tab)
+  const onShortcutPress = (item: ShortcutItem) => {    // Birthdays is inside the Home stack so bottom tabs stay visible
     if (item.id === "s4") {
-      const parent = navigation.getParent();
-      // Parent should be the Root Stack navigator that contains "Birthdays"
-      if (parent && typeof (parent as any).navigate === "function") {
-        (parent as any).navigate("Birthdays");
-        return;
-      }
-      Alert.alert("Birthdays", "Navigation not ready yet (parent navigator missing).");
+      (navigation as any).navigate("Birthdays");
       return;
     }
 
     if (item.action.kind === "tab") {
-      navigation.navigate(item.action.tab);
+      const parent = (navigation as any).getParent?.();
+      if (parent && typeof parent.navigate === "function") {
+        parent.navigate(item.action.tab);
+        return;
+      }
+      (navigation as any).navigate(item.action.tab);
       return;
     }
     Alert.alert("Coming soon", `${item.label} is coming in a later phase.`);
