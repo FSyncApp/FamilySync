@@ -97,3 +97,6 @@ ios/* 2*
 ios/Podfile 2.lock
 ios/Podfile.properties 2.json
 
+
+# Local patch artifacts
+_patches/
