@@ -5,8 +5,8 @@ import { Ionicons } from "@expo/vector-icons";
 
 import HomeScreen from "../screens/HomeScreen";
 import CalendarScreen from "../screens/CalendarScreen";
-import MessagesScreen from "../screens/MessagesScreen";
 import SettingsScreen from "../screens/SettingsScreen";
+import MessagesStack from "./MessagesStack";
 
 export type MainTabParamList = {
   Home: undefined;
@@ -103,8 +103,9 @@ export default function MainTabs(props: any) {
     >
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Calendar" component={CalendarScreen} />
-      <Tab.Screen name="Messages" component={MessagesScreen} />
+      <Tab.Screen name="Messages" component={MessagesStack} />
       <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
   );
 }
+

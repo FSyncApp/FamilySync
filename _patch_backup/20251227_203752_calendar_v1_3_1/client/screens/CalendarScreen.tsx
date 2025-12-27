@@ -11,21 +11,17 @@ import {
 } from "react-native";
 
 /**
- * Calendar v1.4 (Phase 1 thin slice)
- * - Adds an internal mode switcher pinned above the bottom tab bar:
- *    Calendar | Taxi | School
- * - Calendar mode preserves existing Calendar v1.3.1 UI and details modal.
- * - Taxi mode: UI-only scaffold for pickup/drop-offs (no data wiring)
- * - School mode: UI-only scaffold for annual school holidays list (no data wiring)
+ * Calendar v1.3 (Phase 1 thin slice)
+ * - Calendar v1.2.1 + TimeTree-style "tap item -> details" loop
+ *   - Dev-only demo items (so the UX is visible immediately)
+ *   - Tapping an item opens a calm Details Modal (no navigation stack changes)
  * - Month arrows: move by month
  * - Week arrows: move by week
- * - No Supabase wiring
- * - No date picker usage (canonical DatePickerModal remains the only picker when needed later)
+ * - No data wiring (Supabase untouched)
+ * - No date picker usage
  */
 
 const WEEK_STARTS_ON_MONDAY = true;
-
-type CalendarMode = "calendar" | "taxi" | "school";
 
 type ItemKind = "allDay" | "scheduled" | "task";
 
@@ -37,7 +33,6 @@ type BaseItem = {
   sourceLabel?: string; // future: imported/school/user
   colorLabel?: string;  // future: palette/locked sources
   notes?: string;
-  isFeedPlaceholder?: boolean; // structured feed placeholder rows
 };
 
 type AllDayItem = BaseItem & {
@@ -123,20 +118,13 @@ function formatDayTitle(d: Date) {
 }
 
 function formatDayShort(d: Date) {
+  // e.g. "Tue 16 Dec 2025"
   return new Intl.DateTimeFormat(undefined, {
     weekday: "short",
     day: "numeric",
     month: "short",
     year: "numeric",
   }).format(d);
-}
-
-function formatWeekOf(d: Date) {
-  // "Week of 15 Dec"
-  return `Week of ${new Intl.DateTimeFormat(undefined, {
-    day: "numeric",
-    month: "short",
-  }).format(d)}`;
 }
 
 function safeLabel(value?: string, fallback = "None") {
@@ -149,17 +137,13 @@ export default function CalendarScreen() {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [selectedDate, setSelectedDate] = useState<Date>(today);
 
-  const [mode, setMode] = useState<CalendarMode>("calendar");
-
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<AnyItem | null>(null);
 
-  // Dev-only demo items so Calendar UX is visible immediately (Phase 1 thin).
-  // (Taxi/School tabs are UI-only scaffolds; no data wiring yet.)
+  // Dev-only demo items so the UX is visible immediately (Phase 1 thin).
   const devItems = useMemo<AnyItem[]>(() => {
     if (!__DEV__) return [];
     return [
-      // Demo personal items
       {
         id: "demo-all-day-1",
         kind: "allDay",
@@ -236,78 +220,14 @@ export default function CalendarScreen() {
 
   function closeDetails() {
     setDetailsOpen(false);
+    // Keep selectedItem to avoid flicker during closing animation; clear after.
     setTimeout(() => setSelectedItem(null), 200);
   }
 
-  const modalMeta = useMemo(() => {
-    if (!selectedItem) return "";
-    if (selectedItem.kind === "allDay") return `${formatDayShort(selectedDate)} · All-day`;
-    if (selectedItem.kind === "scheduled") {
-      const end = selectedItem.endTimeLabel ? `–${selectedItem.endTimeLabel}` : "";
-      const time = selectedItem.timeLabel && selectedItem.timeLabel !== "—" ? selectedItem.timeLabel : "Scheduled";
-      return `${formatDayShort(selectedDate)} · ${time}${end}`;
-    }
-    return `${formatDayShort(selectedDate)} · Task (due)`;
-  }, [selectedItem, selectedDate]);
+  return (
+    <SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={styles.container}>
 
-  // Ensure Calendar content doesn't hide behind the pinned mode bar
-  const scrollBottomPadding = useMemo(() => styles.modeBarOuter.height + 16, []);
-
-  function TaxiView() {
-    return (
-      <View style={styles.sectionBlock}>
-        <Text style={styles.pageTitle}>Taxi schedule</Text>
-        <Text style={styles.pageSub}>{formatWeekOf(weekStart)}</Text>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Pickups</Text>
-          <Text style={styles.cardEmpty}>No pickups yet</Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Drop-offs</Text>
-          <Text style={styles.cardEmpty}>No drop-offs yet</Text>
-        </View>
-
-        <Pressable
-          onPress={() => Alert.alert("Coming soon", "Taxi schedule editing will be added in a later phase.")}
-          style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Add taxi entry (coming soon)"
-        >
-          <Text style={styles.primaryBtnText}>Add entry</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
-  function SchoolView() {
-    const year = selectedDate.getFullYear();
-    return (
-      <View style={styles.sectionBlock}>
-        <Text style={styles.pageTitle}>School holidays</Text>
-        <Text style={styles.pageSub}>{year}</Text>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Holidays</Text>
-          <Text style={styles.cardEmpty}>No holidays added yet</Text>
-        </View>
-
-        <Pressable
-          onPress={() => Alert.alert("Coming soon", "Holiday entry will be added in a later phase.")}
-          style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
-          accessibilityRole="button"
-          accessibilityLabel="Add holiday (coming soon)"
-        >
-          <Text style={styles.primaryBtnText}>Add holiday</Text>
-        </Pressable>
-      </View>
-    );
-  }
-
-  function CalendarView() {
-    return (
-      <>
         {/* Month Header */}
         <View style={styles.monthHeader}>
           <Pressable
@@ -416,7 +336,7 @@ export default function CalendarScreen() {
           </Pressable>
         </View>
 
-        {/* Day Sheet */}
+        {/* Day Sheet (TimeTree-style) */}
         <View style={styles.daySheet}>
           <View style={styles.daySheetHeader}>
             <Text style={styles.dayTitle}>{formatDayTitle(selectedDate)}</Text>
@@ -501,163 +421,87 @@ export default function CalendarScreen() {
             )}
           </View>
         </View>
-      </>
-    );
-  }
 
-  function ModeButton({
-    label,
-    value,
-  }: {
-    label: string;
-    value: CalendarMode;
-  }) {
-    const selected = mode === value;
-    return (
-      <Pressable
-        onPress={() => setMode(value)}
-        style={({ pressed }) => [
-          styles.modeBarItem,
-          selected && styles.modeBarItemSelected,
-          pressed && styles.pressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={`Switch to ${label}`}
+      </ScrollView>
+
+      {/* Details Modal */}
+      <Modal
+        visible={detailsOpen}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeDetails}
       >
-        <Text style={[styles.modeBarText, selected && styles.modeBarTextSelected]}>
-          {label}
-        </Text>
-      </Pressable>
-    );
-  }
-
-  return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.root}>
-        <ScrollView
-          contentContainerStyle={[styles.container, { paddingBottom: scrollBottomPadding }]}
-        >
-          {mode === "calendar" ? <CalendarView /> : null}
-          {mode === "taxi" ? <TaxiView /> : null}
-          {mode === "school" ? <SchoolView /> : null}
-        </ScrollView>
-
-        {/* Pinned internal mode switcher (sits above bottom tab bar visually) */}
-        <View style={styles.modeBarOuter}>
-          <View style={styles.modeBarInner}>
-            <ModeButton label="Calendar" value="calendar" />
-            <ModeButton label="Taxi" value="taxi" />
-            <ModeButton label="School" value="school" />
+        <SafeAreaView style={styles.modalSafe}>
+          <View style={styles.modalHeader}>
+            <View style={{ flex: 1 }} />
+            <Pressable
+              onPress={closeDetails}
+              style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+            >
+              <Text style={styles.doneBtnText}>Done</Text>
+            </Pressable>
           </View>
-        </View>
 
-        {/* Details Modal (Calendar mode only) */}
-        <Modal
-          visible={detailsOpen}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          onRequestClose={closeDetails}
-        >
-          <SafeAreaView style={styles.modalSafe}>
-            <View style={styles.modalHeader}>
-              <View style={{ flex: 1 }} />
-              <Pressable
-                onPress={closeDetails}
-                style={({ pressed }) => [styles.doneBtn, pressed && styles.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-              >
-                <Text style={styles.doneBtnText}>Done</Text>
-              </Pressable>
+          <ScrollView contentContainerStyle={styles.modalContent}>
+            <Text style={styles.modalTitle}>{selectedItem?.title ?? ""}</Text>
+
+            <Text style={styles.modalMeta}>
+              {selectedItem
+                ? selectedItem.kind === "allDay"
+                  ? `${formatDayShort(selectedDate)} · All-day`
+                  : selectedItem.kind === "scheduled"
+                    ? `${formatDayShort(selectedDate)} · ${selectedItem.timeLabel}${selectedItem.endTimeLabel ? `–${selectedItem.endTimeLabel}` : ""}`
+                    : `${formatDayShort(selectedDate)} · Task (due)`
+                : ""}
+            </Text>
+
+            {!!selectedItem?.subtitle && (
+              <View style={styles.detailCard}>
+                <Text style={styles.detailLabel}>Subtitle</Text>
+                <Text style={styles.detailValue}>{selectedItem.subtitle}</Text>
+              </View>
+            )}
+
+            <View style={styles.detailCard}>
+              <Text style={styles.detailLabel}>Notes</Text>
+              <Text style={styles.detailValue}>{safeLabel(selectedItem?.notes, "None")}</Text>
             </View>
 
-            <ScrollView contentContainerStyle={styles.modalContent}>
-              <Text style={styles.modalTitle}>{selectedItem?.title ?? ""}</Text>
-              <Text style={styles.modalMeta}>{modalMeta}</Text>
+            <View style={styles.detailCard}>
+              <Text style={styles.detailLabel}>Reminder</Text>
+              <Text style={styles.detailValue}>None</Text>
+            </View>
 
-              {!!selectedItem?.subtitle && (
-                <View style={styles.detailCard}>
-                  <Text style={styles.detailLabel}>Subtitle</Text>
-                  <Text style={styles.detailValue}>{selectedItem.subtitle}</Text>
-                </View>
-              )}
+            <View style={styles.detailCard}>
+              <Text style={styles.detailLabel}>Source</Text>
+              <Text style={styles.detailValue}>{safeLabel(selectedItem?.sourceLabel, "FamilySync")}</Text>
+            </View>
 
-              <View style={styles.detailCard}>
-                <Text style={styles.detailLabel}>Notes</Text>
-                <Text style={styles.detailValue}>{safeLabel(selectedItem?.notes, "None")}</Text>
-              </View>
+            <View style={styles.detailCard}>
+              <Text style={styles.detailLabel}>Color</Text>
+              <Text style={styles.detailValue}>{safeLabel(selectedItem?.colorLabel, "Reserved")}</Text>
+            </View>
 
-              <View style={styles.detailCard}>
-                <Text style={styles.detailLabel}>Reminder</Text>
-                <Text style={styles.detailValue}>None</Text>
-              </View>
-
-              <View style={styles.detailCard}>
-                <Text style={styles.detailLabel}>Source</Text>
-                <Text style={styles.detailValue}>{safeLabel(selectedItem?.sourceLabel, "FamilySync")}</Text>
-              </View>
-
-              <View style={styles.detailCard}>
-                <Text style={styles.detailLabel}>Color</Text>
-                <Text style={styles.detailValue}>{safeLabel(selectedItem?.colorLabel, "Reserved")}</Text>
-              </View>
-
-              <Text style={styles.modalFootnote}>
-                Phase 1 scaffold — editing and imports will be added later.
-              </Text>
-            </ScrollView>
-          </SafeAreaView>
-        </Modal>
-      </View>
+            <Text style={styles.modalFootnote}>
+              Phase 1 scaffold — editing and imports will be added later.
+            </Text>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
-
-const MODE_BAR_HEIGHT = 64;
 
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: "#FFFFFF",
   },
-  root: {
-    flex: 1,
-  },
   container: {
     padding: 16,
     paddingBottom: 32,
-  },
-
-  // Internal mode bar pinned above bottom tab bar visually
-  modeBarOuter: {
-    height: MODE_BAR_HEIGHT,
-    paddingHorizontal: 16,
-    paddingBottom: 6,
-    paddingTop: 8,
-    backgroundColor: "#FFFFFF",
-  },
-  modeBarInner: {
-    flex: 1,
-    borderRadius: 18,
-    backgroundColor: "#F4F4F6",
-    flexDirection: "row",
-    overflow: "hidden",
-  },
-  modeBarItem: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  modeBarItemSelected: {
-    backgroundColor: "#121214",
-  },
-  modeBarText: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#5F5F66",
-  },
-  modeBarTextSelected: {
-    color: "#FFFFFF",
   },
 
   monthHeader: {
@@ -873,7 +717,7 @@ const styles = StyleSheet.create({
     width: 4,
     height: 32,
     borderRadius: 2,
-    backgroundColor: "#D9D9DE",
+    backgroundColor: "#D9D9DE", // neutral placeholder; reserved colors later
   },
   timeLabel: {
     width: 54,
@@ -899,52 +743,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: 13,
     color: "#7A7A83",
-  },
-
-  // Taxi/School scaffolds
-  sectionBlock: {
-    paddingTop: 4,
-  },
-  pageTitle: {
-    fontSize: 22,
-    fontWeight: "900",
-    color: "#121214",
-  },
-  pageSub: {
-    marginTop: 6,
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#7A7A83",
-  },
-  card: {
-    marginTop: 14,
-    borderRadius: 18,
-    backgroundColor: "#F7F7F9",
-    padding: 16,
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: "900",
-    color: "#121214",
-  },
-  cardEmpty: {
-    marginTop: 8,
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#7A7A83",
-  },
-  primaryBtn: {
-    marginTop: 16,
-    borderRadius: 18,
-    backgroundColor: "#121214",
-    paddingVertical: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryBtnText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "900",
   },
 
   // Modal

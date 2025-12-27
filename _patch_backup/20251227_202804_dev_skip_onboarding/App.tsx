@@ -18,39 +18,15 @@ export type RootStackParamList = {
   FamilyName: undefined;
   AddChildren: undefined;
   InviteAdults: undefined;
-  Main:
-    | undefined
-    | {
-        /**
-         * If provided, MainTabs will route to this tab on first render.
-         * (MainTabs already supports route.params.initialTab)
-         */
-        initialTab?: "Home" | "Calendar" | "Messages" | "Settings";
-      };
+  Main: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-function isDevSkipOnboardingEnabled() {
-  // Dev-only onboarding bypass (Option A).
-  //
-  // Canon: MUST be removed/disabled before production/TestFlight release.
-  // TODO(REMOVE BEFORE RELEASE): delete this bypass and restore normal onboarding gating.
-  if (!__DEV__) return false;
-
-  const raw = process.env.EXPO_PUBLIC_DEV_SKIP_ONBOARDING;
-  if (!raw) return false;
-
-  const v = String(raw).trim().toLowerCase();
-  return v === "1" || v === "true" || v === "yes";
-}
-
 export default function App() {
-  const devSkipOnboarding = isDevSkipOnboardingEnabled();
-
   return (
     <NavigationContainer>
-      <Stack.Navigator initialRouteName={devSkipOnboarding ? "Main" : "Welcome"}>
+      <Stack.Navigator initialRouteName="Welcome">
         <Stack.Screen
           name="Welcome"
           component={WelcomeScreen}
@@ -91,7 +67,6 @@ export default function App() {
         <Stack.Screen
           name="Main"
           component={MainTabs}
-          initialParams={devSkipOnboarding ? { initialTab: "Home" } : undefined}
           options={{ headerShown: false }}
         />
       </Stack.Navigator>
