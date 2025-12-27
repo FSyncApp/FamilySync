@@ -1,57 +1,218 @@
 import React from "react";
-import { SafeAreaView, View, Text, StyleSheet, ScrollView } from "react-native";
+import {
+  SafeAreaView,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+
+import type { HomeStackParamList } from "../navigation/HomeStack";
+
+type Birthday = {
+  id: string;
+  name: string;
+  relationship?: string;
+  // Phase 1 demo: full date string (DOB)
+  dateYYYYMMDD: string;
+};
+
+const DEMO_BIRTHDAYS: Birthday[] = [
+  { id: "b1", name: "Emma", relationship: "Daughter", dateYYYYMMDD: "2021-12-30" },
+  { id: "b2", name: "Nana", relationship: "Grandmother", dateYYYYMMDD: "1952-01-14" },
+  { id: "b3", name: "Mark", relationship: "Dad", dateYYYYMMDD: "1989-06-07" },
+];
+
+function parseYYYYMMDD(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s).trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (!y || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, mo - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
+  dt.setHours(0, 0, 0, 0);
+  return dt;
+}
+
+function startOfDay(d: Date) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function nextOccurrence(today: Date, month0: number, day: number) {
+  const y = today.getFullYear();
+  const candidateThisYear = new Date(y, month0, day);
+  candidateThisYear.setHours(0, 0, 0, 0);
+  if (candidateThisYear >= today) return candidateThisYear;
+
+  const next = new Date(y + 1, month0, day);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function daysBetween(a: Date, b: Date) {
+  const ms = b.getTime() - a.getTime();
+  return Math.round(ms / (1000 * 60 * 60 * 24));
+}
+
+function formatShortDate(d: Date) {
+  return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+}
+
+function turnsAgeOnNextBirthday(dob: Date, next: Date) {
+  return next.getFullYear() - dob.getFullYear();
+}
+
+type TabKey = "NEXT" | "AZ";
 
 export default function BirthdaysScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
+
+  const [tab, setTab] = React.useState<TabKey>("NEXT");
+
+  const today = startOfDay(new Date());
+
+  const enriched = React.useMemo(() => {
+    return DEMO_BIRTHDAYS.map((b) => {
+      const dob = parseYYYYMMDD(b.dateYYYYMMDD);
+      const month0 = dob ? dob.getMonth() : 0;
+      const day = dob ? dob.getDate() : 1;
+      const next = nextOccurrence(today, month0, day);
+      const days = daysBetween(today, next);
+      const turns = dob ? turnsAgeOnNextBirthday(dob, next) : null;
+      return { ...b, _next: next, _days: days, _turns: turns };
+    });
+  }, [today]);
+
+  const nextUp = React.useMemo(() => {
+    return enriched
+      .filter((b) => b._days >= 0 && b._days <= 60)
+      .sort((a, b) => a._days - b._days);
+  }, [enriched]);
+
+  const allAZ = React.useMemo(() => {
+    return [...enriched].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+    );
+  }, [enriched]);
+
+  const openAdd = () => navigation.navigate("BirthdaysEdit", undefined);
+  const openEdit = (b: Birthday) => navigation.navigate("BirthdaysEdit", { existing: b });
+
+  const renderRow = (b: any) => {
+    const turnsLabel = typeof b._turns === "number" ? `Turns ${b._turns}` : null;
+
+    return (
+      <TouchableOpacity
+        key={b.id}
+        onPress={() => openEdit(b)}
+        activeOpacity={0.85}
+        style={styles.row}
+      >
+        <View style={styles.iconWrap}>
+          <Ionicons
+            name={tab === "NEXT" ? "gift-outline" : "person-circle-outline"}
+            size={20}
+            color={vars.inkMuted}
+          />
+        </View>
+
+        <View style={styles.textWrap}>
+          <View style={styles.nameLine}>
+            <Text style={styles.name} numberOfLines={1}>
+              {b.name}
+            </Text>
+            {turnsLabel ? <Text style={styles.turns}>  · {turnsLabel}</Text> : null}
+          </View>
+
+          <Text style={styles.meta} numberOfLines={1}>
+            {b.relationship ? `${b.relationship} • ` : ""}
+            {tab === "NEXT"
+              ? b._days === 0
+                ? `Today • ${formatShortDate(b._next)}`
+                : `In ${b._days} days • ${formatShortDate(b._next)}`
+              : `${formatShortDate(b._next)}`}
+          </Text>
+        </View>
+
+        <Ionicons name="chevron-forward" size={18} color={vars.inkMuted} />
+      </TouchableOpacity>
+    );
+  };
+
+  const items = tab === "NEXT" ? nextUp : allAZ;
+
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={styles.title}>Birthdays</Text>
-        <Text style={styles.subtitle}>Phase 1 (demo UI only)</Text>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Upcoming</Text>
-
-          <View style={styles.row}>
-            <View style={styles.iconWrap}>
-              <Ionicons name="gift-outline" size={18} color={vars.inkMuted} />
-            </View>
-            <View style={styles.textWrap}>
-              <Text style={styles.name}>Emma</Text>
-              <Text style={styles.meta}>In 3 days</Text>
-            </View>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.headerRow}>
+          <View>
+            <Text style={styles.title}>Birthdays</Text>
+            <Text style={styles.subtitle}>Phase 1 (demo UI only)</Text>
           </View>
 
-          <View style={styles.divider} />
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Add birthday"
+            onPress={openAdd}
+            activeOpacity={0.85}
+            style={styles.addBtn}
+          >
+            <Ionicons name="add" size={18} color="#FFFFFF" />
+            <Text style={styles.addBtnText}>Add</Text>
+          </TouchableOpacity>
+        </View>
 
-          <View style={styles.row}>
-            <View style={styles.iconWrap}>
-              <Ionicons name="gift-outline" size={18} color={vars.inkMuted} />
-            </View>
-            <View style={styles.textWrap}>
-              <Text style={styles.name}>Nana</Text>
-              <Text style={styles.meta}>In 18 days</Text>
-            </View>
-          </View>
+        <View style={styles.tabsWrap}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Show next up"
+            onPress={() => setTab("NEXT")}
+            activeOpacity={0.9}
+            style={[styles.tabBtn, tab === "NEXT" ? styles.tabBtnActive : undefined]}
+          >
+            <Text style={[styles.tabText, tab === "NEXT" ? styles.tabTextActive : undefined]}>
+              Next up
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Show A to Z"
+            onPress={() => setTab("AZ")}
+            activeOpacity={0.9}
+            style={[styles.tabBtn, tab === "AZ" ? styles.tabBtnActive : undefined]}
+          >
+            <Text style={[styles.tabText, tab === "AZ" ? styles.tabTextActive : undefined]}>
+              A–Z
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>All birthdays</Text>
-          <Text style={styles.placeholder}>
-            Coming soon: add/edit, sorting, and full list.
+          <Text style={styles.cardTitle}>
+            {tab === "NEXT" ? "Next up (next 60 days)" : "All birthdays (A–Z)"}
           </Text>
+
+          {tab === "NEXT" && items.length === 0 ? (
+            <Text style={styles.placeholder}>No birthdays in the next 60 days.</Text>
+          ) : (
+            items.map(renderRow)
+          )}
         </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Coming soon</Text>
           <Text style={styles.placeholder}>Reminders / notifications</Text>
           <Text style={styles.placeholder}>Card / gift tracking</Text>
-          <Text style={styles.placeholder}>
-            Shared status (e.g. “card sent”)
-          </Text>
+          <Text style={styles.placeholder}>Shared status (e.g. “card sent”)</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -69,20 +230,48 @@ const vars = {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: vars.bg },
   content: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 24 },
-  title: {
-    fontSize: 26,
-    lineHeight: 32,
-    fontWeight: "700",
-    color: vars.ink,
-    marginBottom: 4,
+
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: 12,
+    gap: 12,
   },
-  subtitle: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600",
-    color: vars.inkMuted,
-    marginBottom: 14,
+
+  title: { fontSize: 26, lineHeight: 32, fontWeight: "700", color: vars.ink, marginBottom: 4 },
+  subtitle: { fontSize: 14, lineHeight: 18, fontWeight: "600", color: vars.inkMuted },
+
+  addBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#111827",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
+  addBtnText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800" },
+
+  tabsWrap: {
+    flexDirection: "row",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: vars.border,
+    borderRadius: 16,
+    padding: 4,
+    marginBottom: 12,
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabBtnActive: { backgroundColor: "#111827" },
+  tabText: { fontSize: 14, fontWeight: "800", color: vars.inkMuted },
+  tabTextActive: { color: "#FFFFFF" },
 
   card: {
     backgroundColor: vars.card,
@@ -93,18 +282,12 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginBottom: 12,
   },
-  cardTitle: {
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: "700",
-    color: vars.ink,
-    marginBottom: 10,
-  },
+  cardTitle: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: vars.ink, marginBottom: 10 },
 
-  row: { flexDirection: "row", alignItems: "center" },
+  row: { flexDirection: "row", alignItems: "center", paddingVertical: 10 },
   iconWrap: {
-    width: 34,
-    height: 34,
+    width: 36,
+    height: 36,
     borderRadius: 12,
     backgroundColor: "#F2F3F7",
     alignItems: "center",
@@ -112,27 +295,12 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   textWrap: { flex: 1 },
-  name: {
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: "700",
-    color: vars.ink,
-  },
-  meta: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600",
-    color: vars.inkMuted,
-    marginTop: 2,
-  },
 
-  divider: { height: 1, backgroundColor: vars.border, marginVertical: 12 },
+  nameLine: { flexDirection: "row", alignItems: "baseline" },
+  name: { fontSize: 16, lineHeight: 20, fontWeight: "900", color: vars.ink },
+  turns: { fontSize: 14, lineHeight: 18, fontWeight: "800", color: vars.inkMuted },
 
-  placeholder: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600",
-    color: vars.inkMuted,
-    marginTop: 8,
-  },
+  meta: { fontSize: 13, lineHeight: 18, fontWeight: "700", color: vars.inkMuted, marginTop: 2 },
+
+  placeholder: { fontSize: 14, lineHeight: 18, fontWeight: "700", color: vars.inkMuted, marginTop: 8 },
 });
