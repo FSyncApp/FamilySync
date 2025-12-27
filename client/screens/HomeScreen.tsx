@@ -7,8 +7,13 @@ import {
   ScrollView,
   TouchableOpacity,
   Platform,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useNavigation } from "@react-navigation/native";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+
+import type { MainTabParamList } from "../navigation/MainTabs";
 
 type TodayItem = {
   id: string;
@@ -17,11 +22,15 @@ type TodayItem = {
   subtitle?: string;
 };
 
+type ShortcutAction =
+  | { kind: "tab"; tab: keyof MainTabParamList }
+  | { kind: "comingSoon" };
+
 type ShortcutItem = {
   id: string;
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
-  onPress?: () => void;
+  action: ShortcutAction;
 };
 
 const TODAY_ITEMS: TodayItem[] = [
@@ -32,19 +41,30 @@ const TODAY_ITEMS: TodayItem[] = [
   { id: "5", icon: "people-outline", title: "Call Nana", subtitle: "Any time" },
 ];
 
+/**
+ * Home v1.4.3 Shortcuts (LOCKED 2×3)
+ * Phase 1 wiring:
+ *  - Calendar → Calendar tab
+ *  - Messages → Messages tab
+ *  - Settings → Settings tab
+ *  - Family → Settings tab (safe home for "family settings" later)
+ *  - Tasks / Meals → "Coming soon" alert (Option A)
+ */
 const SHORTCUTS: ShortcutItem[] = [
-  { id: "s1", icon: "calendar-outline", label: "Calendar" },
-  { id: "s2", icon: "checkmark-done-outline", label: "Tasks" },
-  { id: "s3", icon: "restaurant-outline", label: "Meals" },
-  { id: "s4", icon: "car-outline", label: "Taxi" },
-  { id: "s5", icon: "gift-outline", label: "Birthdays" },
-  { id: "s6", icon: "people-outline", label: "Family" },
+  { id: "s1", icon: "calendar-outline", label: "Calendar", action: { kind: "tab", tab: "Calendar" } },
+  { id: "s2", icon: "checkmark-done-outline", label: "Tasks", action: { kind: "comingSoon" } },
+  { id: "s3", icon: "restaurant-outline", label: "Meals", action: { kind: "comingSoon" } },
+  { id: "s4", icon: "chatbubble-ellipses-outline", label: "Messages", action: { kind: "tab", tab: "Messages" } },
+  { id: "s5", icon: "people-outline", label: "Family", action: { kind: "tab", tab: "Settings" } },
+  { id: "s6", icon: "settings-outline", label: "Settings", action: { kind: "tab", tab: "Settings" } },
 ];
 
 export default function HomeScreen() {
-  // Phase 1: static placeholders. Wiring to Supabase and navigation comes later.
+  // Phase 1: static placeholders. Wiring to Supabase comes later.
   const userName = "Mark";
   const familyName = "Robson";
+
+  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
 
   const onMenuPress = () => {
     // Placeholder for future “all features / menu”
@@ -52,8 +72,11 @@ export default function HomeScreen() {
   };
 
   const onShortcutPress = (item: ShortcutItem) => {
-    if (item.onPress) item.onPress();
-    // Placeholder for future navigation.
+    if (item.action.kind === "tab") {
+      navigation.navigate(item.action.tab);
+      return;
+    }
+    Alert.alert("Coming soon", `${item.label} is coming in a later phase.`);
   };
 
   return (
@@ -122,11 +145,10 @@ export default function HomeScreen() {
           <Text style={styles.birthdayLine}>Emma’s birthday in 3 days</Text>
         </View>
 
-        {/* Shortcuts (v1.4.3) */}
+        {/* Shortcuts (LOCKED) */}
         <View style={styles.shortcutsBlock}>
           <Text style={styles.shortcutsLabel}>Shortcuts</Text>
 
-          {/* LOCKED: 2 rows × 3 columns (6 tiles) */}
           <View style={styles.shortcutsGrid}>
             {SHORTCUTS.map((sc) => (
               <TouchableOpacity
@@ -306,7 +328,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    // 0.81 supports gap, but we keep a deterministic layout via width + margins.
   },
   shortcutTile: {
     width: "31.5%", // 3 columns with space-between (locks 2×3 given 6 tiles)
@@ -319,7 +340,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12, // row spacing
+    marginBottom: 12,
     ...Platform.select({
       ios: {
         shadowColor: "#000",
