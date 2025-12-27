@@ -1,506 +1,354 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React from "react";
 import {
+  SafeAreaView,
   View,
   Text,
   StyleSheet,
-  Pressable,
-  Alert,
-  Dimensions,
+  ScrollView,
+  TouchableOpacity,
+  Platform,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import DraggableFlatList, {
-  RenderItemParams,
-} from "react-native-draggable-flatlist";
+import { Ionicons } from "@expo/vector-icons";
 
-type QuickLinkKey =
-  | "calendar"
-  | "tasks"
-  | "meals"
-  | "birthdays"
-  | "shopping"
-  | "timetable"
-  | "settings";
-
-type QuickLink = {
-  key: QuickLinkKey;
-  label: string;
-  emoji: string;
+type TodayItem = {
+  id: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle?: string;
 };
 
-const STORAGE_KEY = "familysync.quicklinks.v1";
+type ShortcutItem = {
+  id: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress?: () => void;
+};
 
-// Define the universe of links you might want.
-// For v1 these are just placeholders. Later we’ll wire navigation routes.
-const ALL_LINKS: QuickLink[] = [
-  { key: "calendar", label: "Calendar", emoji: "📅" },
-  { key: "tasks", label: "Tasks", emoji: "✅" },
-  { key: "meals", label: "Meals", emoji: "🍽️" },
-  { key: "birthdays", label: "Birthdays", emoji: "🎂" },
-  { key: "shopping", label: "Shopping", emoji: "🛒" },
-  { key: "timetable", label: "Timetable", emoji: "🕒" },
-  { key: "settings", label: "Settings", emoji: "⚙️" },
+const TODAY_ITEMS: TodayItem[] = [
+  { id: "1", icon: "calendar-outline", title: "School drop-off", subtitle: "08:30" },
+  { id: "2", icon: "car-outline", title: "Taxi pickup", subtitle: "15:20" },
+  { id: "3", icon: "checkmark-circle-outline", title: "Pay nursery invoice", subtitle: "Due today" },
+  { id: "4", icon: "time-outline", title: "Dinner plan", subtitle: "Pasta night" },
+  { id: "5", icon: "people-outline", title: "Call Nana", subtitle: "Any time" },
 ];
 
-// Default “most used” quick links (can be edited)
-const DEFAULT_ACTIVE_KEYS: QuickLinkKey[] = ["calendar", "tasks", "meals", "shopping"];
-
-type PersistedState = {
-  activeKeys: QuickLinkKey[];
-  orderKeys: QuickLinkKey[];
-};
-
-function clampActiveOrder(
-  activeKeys: QuickLinkKey[],
-  orderKeys: QuickLinkKey[],
-  allKeys: QuickLinkKey[]
-) {
-  const activeSet = new Set(activeKeys.filter((k) => allKeys.includes(k)));
-  const dedupOrder = Array.from(new Set(orderKeys.filter((k) => allKeys.includes(k))));
-
-  // Ensure all keys appear somewhere in order (active first is NOT required; we keep a master order)
-  const missing = allKeys.filter((k) => !dedupOrder.includes(k));
-  const mergedOrder = [...dedupOrder, ...missing];
-
-  // Active keys should keep the order they appear in mergedOrder
-  const activeInOrder = mergedOrder.filter((k) => activeSet.has(k));
-  return { activeKeys: activeInOrder, orderKeys: mergedOrder };
-}
+const SHORTCUTS: ShortcutItem[] = [
+  { id: "s1", icon: "calendar-outline", label: "Calendar" },
+  { id: "s2", icon: "checkmark-done-outline", label: "Tasks" },
+  { id: "s3", icon: "restaurant-outline", label: "Meals" },
+  { id: "s4", icon: "car-outline", label: "Taxi" },
+  { id: "s5", icon: "gift-outline", label: "Birthdays" },
+  { id: "s6", icon: "people-outline", label: "Family" },
+];
 
 export default function HomeScreen() {
-  const allKeys = useMemo(() => ALL_LINKS.map((l) => l.key), []);
-  const [isEditMode, setIsEditMode] = useState(false);
+  // Phase 1: static placeholders. Wiring to Supabase and navigation comes later.
+  const userName = "Mark";
+  const familyName = "Robson";
 
-  // orderKeys = master ordering for all items (active + inactive)
-  const [orderKeys, setOrderKeys] = useState<QuickLinkKey[]>(() => allKeys);
-  const [activeKeys, setActiveKeys] = useState<QuickLinkKey[]>(() => DEFAULT_ACTIVE_KEYS);
+  const onMenuPress = () => {
+    // Placeholder for future “all features / menu”
+    // Intentionally no navigation yet (Phase 1).
+  };
 
-  const orderedLinks = useMemo(() => {
-    const map = new Map<QuickLinkKey, QuickLink>();
-    for (const l of ALL_LINKS) map.set(l.key, l);
-
-    return orderKeys
-      .map((k) => map.get(k))
-      .filter(Boolean) as QuickLink[];
-  }, [orderKeys]);
-
-  const activeLinks = useMemo(() => {
-    const activeSet = new Set(activeKeys);
-    return orderedLinks.filter((l) => activeSet.has(l.key));
-  }, [activeKeys, orderedLinks]);
-
-  const load = useCallback(async () => {
-    try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-
-      const parsed: PersistedState = JSON.parse(raw);
-      const next = clampActiveOrder(
-        parsed.activeKeys ?? DEFAULT_ACTIVE_KEYS,
-        parsed.orderKeys ?? allKeys,
-        allKeys
-      );
-      setActiveKeys(next.activeKeys);
-      setOrderKeys(next.orderKeys);
-    } catch {
-      // If storage is corrupt, ignore and keep defaults.
-    }
-  }, [allKeys]);
-
-  const save = useCallback(
-    async (nextActive: QuickLinkKey[], nextOrder: QuickLinkKey[]) => {
-      const next = clampActiveOrder(nextActive, nextOrder, allKeys);
-      setActiveKeys(next.activeKeys);
-      setOrderKeys(next.orderKeys);
-      try {
-        const payload: PersistedState = {
-          activeKeys: next.activeKeys,
-          orderKeys: next.orderKeys,
-        };
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-      } catch {
-        // ignore
-      }
-    },
-    [allKeys]
-  );
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  const onPressLink = useCallback((link: QuickLink) => {
-    Alert.alert("Quick Link", `${link.label} tapped (wire navigation later)`);
-  }, []);
-
-  const toggleActive = useCallback(
-    (key: QuickLinkKey) => {
-      const isActive = activeKeys.includes(key);
-      const nextActive = isActive
-        ? activeKeys.filter((k) => k !== key)
-        : [...activeKeys, key];
-
-      // Keep active keys ordered according to orderKeys
-      const next = clampActiveOrder(nextActive, orderKeys, allKeys);
-      save(next.activeKeys, next.orderKeys);
-    },
-    [activeKeys, allKeys, orderKeys, save]
-  );
-
-  const resetToDefault = useCallback(() => {
-    const next = clampActiveOrder(DEFAULT_ACTIVE_KEYS, allKeys, allKeys);
-    save(next.activeKeys, next.orderKeys);
-    setIsEditMode(false);
-  }, [allKeys, save]);
-
-  const screenWidth = Dimensions.get("window").width;
-  const tileWidth = useMemo(() => {
-    // 4 tiles across with spacing, but adapt down if screen is small
-    const padding = 16 * 2;
-    const gap = 10;
-    const columns = screenWidth < 360 ? 3 : 4;
-    return Math.floor((screenWidth - padding - gap * (columns - 1)) / columns);
-  }, [screenWidth]);
-
-  const renderQuickLinkTile = useCallback(
-    (link: QuickLink) => {
-      return (
-        <Pressable
-          key={link.key}
-          onPress={() => onPressLink(link)}
-          style={[styles.tile, { width: tileWidth }]}
-        >
-          <Text style={styles.tileEmoji}>{link.emoji}</Text>
-          <Text style={styles.tileLabel} numberOfLines={1}>
-            {link.label}
-          </Text>
-        </Pressable>
-      );
-    },
-    [onPressLink, tileWidth]
-  );
-
-  const renderEditRow = useCallback(
-    ({ item, drag, isActive }: RenderItemParams<QuickLink>) => {
-      const enabled = activeKeys.includes(item.key);
-
-      return (
-        <Pressable
-          onLongPress={drag}
-          onPress={() => toggleActive(item.key)}
-          style={[
-            styles.editRow,
-            enabled ? styles.editRowEnabled : styles.editRowDisabled,
-            isActive ? styles.editRowDragging : null,
-          ]}
-        >
-          <View style={styles.editRowLeft}>
-            <Text style={styles.editRowEmoji}>{item.emoji}</Text>
-            <Text style={styles.editRowLabel}>{item.label}</Text>
-          </View>
-
-          <View style={styles.editRowRight}>
-            <Text style={[styles.pill, enabled ? styles.pillOn : styles.pillOff]}>
-              {enabled ? "On" : "Off"}
-            </Text>
-            <Text style={styles.dragHint}>⠿</Text>
-          </View>
-        </Pressable>
-      );
-    },
-    [activeKeys, toggleActive]
-  );
+  const onShortcutPress = (item: ShortcutItem) => {
+    if (item.onPress) item.onPress();
+    // Placeholder for future navigation.
+  };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.page}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>FamilySync</Text>
-            <Text style={styles.subtitle}>Home screen loaded correctly</Text>
+    <SafeAreaView style={styles.safe}>
+      <ScrollView
+        style={styles.page}
+        contentContainerStyle={styles.pageContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Top App Chrome (scrolls with page, not sticky) */}
+        <View style={styles.topChrome}>
+          <View style={styles.brandLeft}>
+            <View style={styles.appIcon} />
           </View>
 
-          <View style={styles.headerActions}>
-            {isEditMode ? (
-              <>
-                <Pressable
-                  onPress={() => setIsEditMode(false)}
-                  style={[styles.headerBtn, styles.headerBtnPrimary]}
-                >
-                  <Text style={[styles.headerBtnText, styles.headerBtnTextPrimary]}>
-                    Done
-                  </Text>
-                </Pressable>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Open menu"
+            onPress={onMenuPress}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            style={styles.menuButton}
+          >
+            <Ionicons name="menu-outline" size={24} color={stylesVars.ink} />
+          </TouchableOpacity>
+        </View>
 
-                <Pressable
-                  onPress={resetToDefault}
-                  style={[styles.headerBtn, styles.headerBtnGhost]}
-                >
-                  <Text style={styles.headerBtnText}>Reset</Text>
-                </Pressable>
-              </>
-            ) : (
-              <Pressable
-                onPress={() => setIsEditMode(true)}
-                style={[styles.headerBtn, styles.headerBtnGhost]}
+        {/* Welcome & Context */}
+        <View style={styles.welcomeBlock}>
+          <Text style={styles.welcomeTitle}>Welcome back, {userName}</Text>
+          <Text style={styles.familySubtitle}>{familyName} Family</Text>
+        </View>
+
+        {/* Today Container (CORE) */}
+        <View style={styles.todayContainer}>
+          <Text style={styles.todayHeader}>Here’s what’s happening today</Text>
+
+          <ScrollView
+            style={styles.todayList}
+            contentContainerStyle={styles.todayListContent}
+            showsVerticalScrollIndicator={true}
+            nestedScrollEnabled={true}
+          >
+            {TODAY_ITEMS.map((item) => (
+              <View key={item.id} style={styles.todayRow}>
+                <View style={styles.todayIconWrap}>
+                  <Ionicons name={item.icon} size={18} color={stylesVars.inkMuted} />
+                </View>
+
+                <View style={styles.todayTextWrap}>
+                  <Text style={styles.todayTitle} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  {item.subtitle ? (
+                    <Text style={styles.todaySubtitle} numberOfLines={1}>
+                      {item.subtitle}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+
+        {/* Birthday Indicator (LOCKED) */}
+        <View style={styles.birthdayLineWrap}>
+          <Text style={styles.birthdayLine}>Emma’s birthday in 3 days</Text>
+        </View>
+
+        {/* Shortcuts (v1.4.3) */}
+        <View style={styles.shortcutsBlock}>
+          <Text style={styles.shortcutsLabel}>Shortcuts</Text>
+
+          {/* LOCKED: 2 rows × 3 columns (6 tiles) */}
+          <View style={styles.shortcutsGrid}>
+            {SHORTCUTS.map((sc) => (
+              <TouchableOpacity
+                key={sc.id}
+                accessibilityRole="button"
+                accessibilityLabel={sc.label}
+                onPress={() => onShortcutPress(sc)}
+                activeOpacity={0.8}
+                style={styles.shortcutTile}
               >
-                <Text style={styles.headerBtnText}>Edit</Text>
-              </Pressable>
-            )}
+                <View style={styles.shortcutIcon}>
+                  <Ionicons name={sc.icon} size={20} color={stylesVars.inkMuted} />
+                </View>
+                <Text style={styles.shortcutText} numberOfLines={1}>
+                  {sc.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </View>
 
-        {/* Main content placeholder */}
-        <View style={styles.body}>
-          <View style={styles.placeholderCard}>
-            <Text style={styles.placeholderTitle}>Family Wall (v1)</Text>
-            <Text style={styles.placeholderText}>
-              Next: we’ll drop in your Home “family wall” layout and keep Quick Links pinned
-              at the bottom.
-            </Text>
-          </View>
-        </View>
-
-        {/* Bottom Quick Links / Edit Panel */}
-        <View style={styles.bottomPanel}>
-          <View style={styles.bottomPanelTop}>
-            <Text style={styles.bottomTitle}>Quick Links</Text>
-            <Text style={styles.bottomHint}>
-              {isEditMode ? "Tap to toggle • Long-press to reorder" : "Tap a link"}
-            </Text>
-          </View>
-
-          {isEditMode ? (
-            <View style={styles.editListWrap}>
-              <DraggableFlatList
-                data={orderedLinks}
-                keyExtractor={(item) => item.key}
-                renderItem={renderEditRow}
-                onDragEnd={({ data }) => {
-                  const nextOrder = data.map((d) => d.key) as QuickLinkKey[];
-                  save(activeKeys, nextOrder);
-                }}
-              />
-            </View>
-          ) : (
-            <View style={styles.tilesRow}>
-              {activeLinks.length === 0 ? (
-                <Pressable onPress={() => setIsEditMode(true)} style={styles.emptyState}>
-                  <Text style={styles.emptyStateText}>
-                    No Quick Links selected. Tap “Edit” to add some.
-                  </Text>
-                </Pressable>
-              ) : (
-                activeLinks.map(renderQuickLinkTile)
-              )}
-            </View>
-          )}
-        </View>
-      </View>
+        {/* Bottom empty space (expected, until future sections/nav) */}
+        <View style={styles.bottomSpacer} />
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
+const stylesVars = {
+  bg: "#F5F6F8",
+  card: "#FFFFFF",
+  border: "#E6E8EE",
+  ink: "#111827",
+  inkMuted: "#6B7280",
+};
+
 const styles = StyleSheet.create({
-  safeArea: {
+  safe: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: stylesVars.bg,
   },
+
   page: {
     flex: 1,
   },
+  pageContent: {
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 24,
+  },
 
-  header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: "#111",
-  },
-  subtitle: {
-    fontSize: 14,
-    marginTop: 6,
-    color: "#666",
-  },
-  headerActions: {
+  // Top chrome
+  topChrome: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    marginTop: 4,
-  },
-  headerBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  headerBtnGhost: {
-    backgroundColor: "#FFF",
-    borderColor: "#E5E5E5",
-  },
-  headerBtnPrimary: {
-    backgroundColor: "#111",
-    borderColor: "#111",
-  },
-  headerBtnText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#111",
-  },
-  headerBtnTextPrimary: {
-    color: "#FFF",
-  },
-
-  body: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  placeholderCard: {
-    borderWidth: 1,
-    borderColor: "#EEE",
-    borderRadius: 16,
-    padding: 14,
-  },
-  placeholderTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111",
-    marginBottom: 6,
-  },
-  placeholderText: {
-    fontSize: 14,
-    color: "#555",
-    lineHeight: 20,
-  },
-
-  bottomPanel: {
-    borderTopWidth: 1,
-    borderTopColor: "#EEE",
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 14,
-    backgroundColor: "#FFF",
-  },
-  bottomPanelTop: {
-    flexDirection: "row",
-    alignItems: "baseline",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: 16,
   },
-  bottomTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#111",
-  },
-  bottomHint: {
-    fontSize: 12,
-    color: "#777",
-  },
-
-  tilesRow: {
+  brandLeft: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 10,
+    alignItems: "center",
   },
-  tile: {
+  appIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 7,
+    backgroundColor: "#111827",
+    opacity: 0.9,
+  },
+  menuButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: stylesVars.card,
     borderWidth: 1,
-    borderColor: "#EDEDED",
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
+    borderColor: stylesVars.border,
     alignItems: "center",
     justifyContent: "center",
   },
-  tileEmoji: {
-    fontSize: 18,
+
+  // Welcome & context
+  welcomeBlock: {
+    marginBottom: 16,
+  },
+  welcomeTitle: {
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: "700",
+    color: stylesVars.ink,
     marginBottom: 6,
   },
-  tileLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#111",
-  },
-
-  emptyState: {
-    width: "100%",
-    borderWidth: 1,
-    borderColor: "#EEE",
-    borderRadius: 14,
-    padding: 12,
-  },
-  emptyStateText: {
-    fontSize: 13,
-    color: "#666",
-  },
-
-  editListWrap: {
-    height: 260,
-  },
-  editRow: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  editRowEnabled: {
-    borderColor: "#DADADA",
-    backgroundColor: "#FFF",
-  },
-  editRowDisabled: {
-    borderColor: "#EFEFEF",
-    backgroundColor: "#FAFAFA",
-  },
-  editRowDragging: {
-    opacity: 0.9,
-  },
-  editRowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  editRowEmoji: {
-    fontSize: 18,
-  },
-  editRowLabel: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#111",
-  },
-  editRowRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  pill: {
-    fontSize: 12,
-    fontWeight: "700",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    overflow: "hidden",
-  },
-  pillOn: {
-    backgroundColor: "#111",
-    color: "#FFF",
-  },
-  pillOff: {
-    backgroundColor: "#EDEDED",
-    color: "#111",
-  },
-  dragHint: {
+  familySubtitle: {
     fontSize: 16,
-    color: "#777",
+    lineHeight: 20,
+    fontWeight: "600",
+    color: stylesVars.inkMuted,
+  },
+
+  // Today container
+  todayContainer: {
+    backgroundColor: stylesVars.card,
+    borderWidth: 1,
+    borderColor: stylesVars.border,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 10,
+    marginBottom: 12,
+  },
+  todayHeader: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: stylesVars.ink,
+    marginBottom: 10,
+  },
+  todayList: {
+    maxHeight: 180,
+  },
+  todayListContent: {
+    paddingBottom: 6,
+  },
+  todayRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: stylesVars.border,
+  },
+  todayIconWrap: {
+    width: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 10,
+  },
+  todayTextWrap: {
+    flex: 1,
+  },
+  todayTitle: {
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: "600",
+    color: stylesVars.ink,
+  },
+  todaySubtitle: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "500",
+    color: stylesVars.inkMuted,
+  },
+
+  // Birthday indicator (single reserved line)
+  birthdayLineWrap: {
+    marginTop: 2,
+    marginBottom: 18,
+  },
+  birthdayLine: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: stylesVars.inkMuted,
+  },
+
+  // Shortcuts
+  shortcutsBlock: {
+    marginTop: 2,
+  },
+  shortcutsLabel: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: stylesVars.ink,
+    marginBottom: 10,
+  },
+  shortcutsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    // 0.81 supports gap, but we keep a deterministic layout via width + margins.
+  },
+  shortcutTile: {
+    width: "31.5%", // 3 columns with space-between (locks 2×3 given 6 tiles)
+    minHeight: 88,
+    backgroundColor: stylesVars.card,
+    borderWidth: 1,
+    borderColor: stylesVars.border,
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12, // row spacing
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOpacity: 0.03,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 },
+      },
+      android: {
+        elevation: 1,
+      },
+    }),
+  },
+  shortcutIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: "#F2F3F6",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 8,
+  },
+  shortcutText: {
+    fontSize: 12.5,
+    lineHeight: 16,
+    fontWeight: "600",
+    color: stylesVars.ink,
+  },
+
+  bottomSpacer: {
+    height: 26,
   },
 });
