@@ -9,6 +9,7 @@ import FamilyNameScreen from "./client/screens/FamilyNameScreen";
 import AddChildrenScreen from "./client/screens/AddChildrenScreen";
 import InviteAdultsScreen from "./client/screens/InviteAdultsScreen";
 
+import BirthdaysScreen from "./client/screens/BirthdaysScreen";
 import MainTabs from "./client/navigation/MainTabs";
 
 export type RootStackParamList = {
@@ -18,6 +19,7 @@ export type RootStackParamList = {
   FamilyName: undefined;
   AddChildren: undefined;
   InviteAdults: undefined;
+  Birthdays: undefined;
   Main:
     | undefined
     | {
@@ -85,6 +87,12 @@ export default function App() {
           name="InviteAdults"
           component={InviteAdultsScreen}
           options={{ title: "", headerBackTitleVisible: false }}
+        />
+
+        <Stack.Screen
+          name="Birthdays"
+          component={BirthdaysScreen}
+          options={{ title: "Birthdays", headerBackTitleVisible: false }}
         />
 
         {/* Post-onboarding: bottom tab shell */}

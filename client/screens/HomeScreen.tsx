@@ -54,7 +54,7 @@ const SHORTCUTS: ShortcutItem[] = [
   { id: "s1", icon: "calendar-outline", label: "Calendar", action: { kind: "tab", tab: "Calendar" } },
   { id: "s2", icon: "checkmark-done-outline", label: "Tasks", action: { kind: "comingSoon" } },
   { id: "s3", icon: "restaurant-outline", label: "Meals", action: { kind: "comingSoon" } },
-  { id: "s4", icon: "chatbubble-ellipses-outline", label: "Messages", action: { kind: "tab", tab: "Messages" } },
+  { id: "s4", icon: "gift-outline", label: "Birthdays", action: { kind: "comingSoon" } },
   { id: "s5", icon: "people-outline", label: "Family", action: { kind: "tab", tab: "Settings" } },
   { id: "s6", icon: "settings-outline", label: "Settings", action: { kind: "tab", tab: "Settings" } },
 ];
@@ -72,6 +72,18 @@ export default function HomeScreen() {
   };
 
   const onShortcutPress = (item: ShortcutItem) => {
+    // Birthdays is a Root Stack screen (not a bottom tab)
+    if (item.id === "s4") {
+      const parent = navigation.getParent();
+      // Parent should be the Root Stack navigator that contains "Birthdays"
+      if (parent && typeof (parent as any).navigate === "function") {
+        (parent as any).navigate("Birthdays");
+        return;
+      }
+      Alert.alert("Birthdays", "Navigation not ready yet (parent navigator missing).");
+      return;
+    }
+
     if (item.action.kind === "tab") {
       navigation.navigate(item.action.tab);
       return;

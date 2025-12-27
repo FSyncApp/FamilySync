@@ -1,5 +1,17 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView } from "react-native";
+import Constants from "expo-constants";
+
+function getVersionText() {
+  // Expo SDK 54: Constants.expoConfig is the common source at runtime.
+  const version = (Constants as any)?.expoConfig?.version ?? "0.1";
+  const build =
+    (Constants as any)?.expoConfig?.ios?.buildNumber ??
+    (Constants as any)?.expoConfig?.android?.versionCode ??
+    undefined;
+
+  return build ? `Version ${version} (build ${build})` : `Version ${version} (dev)`;
+}
 
 export default function AboutScreen() {
   return (
@@ -7,7 +19,7 @@ export default function AboutScreen() {
       <View style={styles.hero}>
         <Text style={styles.appName}>FamilySync</Text>
         <Text style={styles.tagline}>Calm, family-first home operating system.</Text>
-        <Text style={styles.version}>Version 0.1 (dev)</Text>
+        <Text style={styles.version}>{getVersionText()}</Text>
       </View>
 
       <View style={styles.card}>
@@ -17,6 +29,10 @@ export default function AboutScreen() {
         <Divider />
         <Item title="Credits" subtitle="Coming soon" />
       </View>
+
+      <Text style={styles.footnote}>
+        Phase 1 is UI-only. Data syncing and account features will be added in later phases.
+      </Text>
     </ScrollView>
   );
 }
@@ -40,6 +56,7 @@ const styles = StyleSheet.create({
   appName: { fontSize: 26, fontWeight: "900", color: "#111827" },
   tagline: { marginTop: 6, fontSize: 14, color: "#374151" },
   version: { marginTop: 10, fontSize: 12, color: "#6B7280" },
+
   card: {
     borderRadius: 14,
     backgroundColor: "#F9FAFB",
@@ -51,4 +68,6 @@ const styles = StyleSheet.create({
   itemTitle: { fontSize: 15, fontWeight: "800", color: "#111827" },
   itemSubtitle: { fontSize: 12, marginTop: 3, color: "#6B7280" },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: "#E5E7EB" },
+
+  footnote: { marginTop: 14, fontSize: 12, color: "#6B7280", lineHeight: 16 },
 });
