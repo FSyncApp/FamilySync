@@ -14,7 +14,13 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 
-import DatePickerModal, { formatYYYYMMDD, parseYYYYMMDD } from "../components/DatePickerModal";
+import DatePickerModal, {
+  formatYYYYMMDD,
+  parseYYYYMMDD,
+  formatDisplayFromYYYYMMDD,
+} from "../components/DatePickerModal";
+
+import { upsertBirthday, type Birthday } from "../data/birthdaysStore";
 import type { HomeStackParamList } from "../navigation/HomeStack";
 
 type Nav = NativeStackNavigationProp<HomeStackParamList>;
@@ -24,7 +30,7 @@ export default function BirthdaysEditScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<R>();
 
-  const existing = route.params?.existing;
+  const existing = route.params?.existing as Birthday | undefined;
 
   const [name, setName] = React.useState(existing?.name ?? "");
   const [relationship, setRelationship] = React.useState(existing?.relationship ?? "");
@@ -46,11 +52,13 @@ export default function BirthdaysEditScreen() {
       return;
     }
 
-    // Phase 1 demo: no persistence yet.
-    Alert.alert(
-      "Saved (demo)",
-      `${trimmed}${relationship.trim() ? ` • ${relationship.trim()}` : ""}\n${dateYYYYMMDD}`
-    );
+    upsertBirthday({
+      id: existing?.id, // IMPORTANT: preserves edit vs new
+      name: trimmed,
+      relationship: relationship.trim() || undefined,
+      dateYYYYMMDD,
+    });
+
     navigation.goBack();
   };
 
@@ -98,7 +106,7 @@ export default function BirthdaysEditScreen() {
             style={styles.dateButton}
           >
             <Ionicons name="calendar-outline" size={18} color={vars.inkMuted} />
-            <Text style={styles.dateText}>{dateYYYYMMDD}</Text>
+            <Text style={styles.dateText}>{formatDisplayFromYYYYMMDD(dateYYYYMMDD)}</Text>
             <Ionicons name="chevron-down" size={16} color={vars.inkMuted} />
           </TouchableOpacity>
 

@@ -14,7 +14,7 @@ import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 
 import type { MainTabParamList } from "../navigation/MainTabs";
-
+import { useBirthdayTickerLabel } from "../data/birthdaysStore";
 type TodayItem = {
   id: string;
   icon: keyof typeof Ionicons.glyphMap;
@@ -66,7 +66,8 @@ export default function HomeScreen() {
 
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
 
-  const onMenuPress = () => {
+  const birthdayTicker = useBirthdayTickerLabel({ withinDays: 60, rotateWindowDays: 14, rotateEveryMs: 3500 });
+const onMenuPress = () => {
     // Placeholder for future “all features / menu”
     // Intentionally no navigation yet (Phase 1).
   };
@@ -151,9 +152,11 @@ export default function HomeScreen() {
         </View>
 
         {/* Birthday Indicator (LOCKED) */}
-        <View style={styles.birthdayLineWrap}>
-          <Text style={styles.birthdayLine}>Emma’s birthday in 3 days</Text>
-        </View>
+        {birthdayTicker.visible ? (
+          <View style={styles.birthdayLineWrap}>
+            <Text style={styles.birthdayLine}>{birthdayTicker.label}</Text>
+          </View>
+        ) : null}
 
         {/* Shortcuts (LOCKED) */}
         <View style={styles.shortcutsBlock}>

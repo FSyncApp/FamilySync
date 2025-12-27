@@ -38,6 +38,29 @@ export function parseYYYYMMDD(s: string): Date | null {
   return date;
 }
 
+/**
+ * Display helpers (Phase 1):
+ * - Keep canonical storage as YYYY-MM-DD
+ * - Display to users as "DD Mon YYYY" (e.g. 30 Dec 2025)
+ * Later: this can be user-configurable in Settings.
+ */
+export function formatDisplayDMY(d: Date) {
+  try {
+    return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  } catch {
+    const y = d.getFullYear();
+    const m = pad2(d.getMonth() + 1);
+    const day = pad2(d.getDate());
+    return `${day}-${m}-${y}`;
+  }
+}
+
+export function formatDisplayFromYYYYMMDD(s: string) {
+  const d = parseYYYYMMDD(s);
+  if (!d) return s;
+  return formatDisplayDMY(d);
+}
+
 type Props = {
   visible: boolean;
   title?: string;

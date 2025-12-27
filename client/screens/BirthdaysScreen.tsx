@@ -11,34 +11,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
+import { formatDisplayDMY, parseYYYYMMDD } from "../components/DatePickerModal";
+import { getBirthdays, subscribeBirthdays, type Birthday } from "../data/birthdaysStore";
 import type { HomeStackParamList } from "../navigation/HomeStack";
-
-type Birthday = {
-  id: string;
-  name: string;
-  relationship?: string;
-  // Phase 1 demo: full date string (DOB)
-  dateYYYYMMDD: string;
-};
-
-const DEMO_BIRTHDAYS: Birthday[] = [
-  { id: "b1", name: "Emma", relationship: "Daughter", dateYYYYMMDD: "2021-12-30" },
-  { id: "b2", name: "Nana", relationship: "Grandmother", dateYYYYMMDD: "1952-01-14" },
-  { id: "b3", name: "Mark", relationship: "Dad", dateYYYYMMDD: "1989-06-07" },
-];
-
-function parseYYYYMMDD(s: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s).trim());
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]);
-  const d = Number(m[3]);
-  if (!y || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
-  const dt = new Date(y, mo - 1, d);
-  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) return null;
-  dt.setHours(0, 0, 0, 0);
-  return dt;
-}
 
 function startOfDay(d: Date) {
   const x = new Date(d);
@@ -48,9 +23,9 @@ function startOfDay(d: Date) {
 
 function nextOccurrence(today: Date, month0: number, day: number) {
   const y = today.getFullYear();
-  const candidateThisYear = new Date(y, month0, day);
-  candidateThisYear.setHours(0, 0, 0, 0);
-  if (candidateThisYear >= today) return candidateThisYear;
+  const candidate = new Date(y, month0, day);
+  candidate.setHours(0, 0, 0, 0);
+  if (candidate >= today) return candidate;
 
   const next = new Date(y + 1, month0, day);
   next.setHours(0, 0, 0, 0);
@@ -62,10 +37,6 @@ function daysBetween(a: Date, b: Date) {
   return Math.round(ms / (1000 * 60 * 60 * 24));
 }
 
-function formatShortDate(d: Date) {
-  return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
-}
-
 function turnsAgeOnNextBirthday(dob: Date, next: Date) {
   return next.getFullYear() - dob.getFullYear();
 }
@@ -74,13 +45,16 @@ type TabKey = "NEXT" | "AZ";
 
 export default function BirthdaysScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
-
   const [tab, setTab] = React.useState<TabKey>("NEXT");
 
+  const [, force] = React.useState(0);
+  React.useEffect(() => subscribeBirthdays(() => force((n) => n + 1)), []);
+
+  const birthdays = getBirthdays();
   const today = startOfDay(new Date());
 
   const enriched = React.useMemo(() => {
-    return DEMO_BIRTHDAYS.map((b) => {
+    return birthdays.map((b) => {
       const dob = parseYYYYMMDD(b.dateYYYYMMDD);
       const month0 = dob ? dob.getMonth() : 0;
       const day = dob ? dob.getDate() : 1;
@@ -89,7 +63,7 @@ export default function BirthdaysScreen() {
       const turns = dob ? turnsAgeOnNextBirthday(dob, next) : null;
       return { ...b, _next: next, _days: days, _turns: turns };
     });
-  }, [today]);
+  }, [birthdays, today]);
 
   const nextUp = React.useMemo(() => {
     return enriched
@@ -103,8 +77,19 @@ export default function BirthdaysScreen() {
     );
   }, [enriched]);
 
+  const items = tab === "NEXT" ? nextUp : allAZ;
+
   const openAdd = () => navigation.navigate("BirthdaysEdit", undefined);
   const openEdit = (b: Birthday) => navigation.navigate("BirthdaysEdit", { existing: b });
+
+  const formatMeta = (b: any) => {
+    if (tab === "NEXT") {
+      if (b._days === 0) return `Today • ${formatDisplayDMY(b._next)}`;
+      if (b._days === 1) return `Tomorrow • ${formatDisplayDMY(b._next)}`;
+      return `In ${b._days} days • ${formatDisplayDMY(b._next)}`;
+    }
+    return formatDisplayDMY(b._next);
+  };
 
   const renderRow = (b: any) => {
     const turnsLabel = typeof b._turns === "number" ? `Turns ${b._turns}` : null;
@@ -134,11 +119,7 @@ export default function BirthdaysScreen() {
 
           <Text style={styles.meta} numberOfLines={1}>
             {b.relationship ? `${b.relationship} • ` : ""}
-            {tab === "NEXT"
-              ? b._days === 0
-                ? `Today • ${formatShortDate(b._next)}`
-                : `In ${b._days} days • ${formatShortDate(b._next)}`
-              : `${formatShortDate(b._next)}`}
+            {formatMeta(b)}
           </Text>
         </View>
 
@@ -146,8 +127,6 @@ export default function BirthdaysScreen() {
       </TouchableOpacity>
     );
   };
-
-  const items = tab === "NEXT" ? nextUp : allAZ;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -269,9 +248,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  tabBtnActive: { backgroundColor: "#111827" },
-  tabText: { fontSize: 14, fontWeight: "800", color: vars.inkMuted },
-  tabTextActive: { color: "#FFFFFF" },
+  tabBtnActive: {
+    backgroundColor: "#111827",
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: vars.inkMuted,
+  },
+  tabTextActive: {
+    color: "#FFFFFF",
+  },
 
   card: {
     backgroundColor: vars.card,
