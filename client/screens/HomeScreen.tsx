@@ -1,20 +1,12 @@
 import React from "react";
-import {
-  SafeAreaView,
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Platform,
-  Alert,
-} from "react-native";
+import { SafeAreaView, View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 
 import type { MainTabParamList } from "../navigation/MainTabs";
 import { useBirthdayTickerLabel } from "../data/birthdaysStore";
+
 type TodayItem = {
   id: string;
   icon: keyof typeof Ionicons.glyphMap;
@@ -22,9 +14,7 @@ type TodayItem = {
   subtitle?: string;
 };
 
-type ShortcutAction =
-  | { kind: "tab"; tab: keyof MainTabParamList }
-  | { kind: "comingSoon" };
+type ShortcutAction = { kind: "tab"; tab: keyof MainTabParamList } | { kind: "comingSoon" };
 
 type ShortcutItem = {
   id: string;
@@ -48,12 +38,14 @@ const TODAY_ITEMS: TodayItem[] = [
  *  - Messages → Messages tab
  *  - Settings → Settings tab
  *  - Family → Settings tab (safe home for "family settings" later)
+ *  - Birthdays → Birthdays screen (HomeStack)
  *  - Tasks / Meals → "Coming soon" alert (Option A)
  */
 const SHORTCUTS: ShortcutItem[] = [
   { id: "s1", icon: "calendar-outline", label: "Calendar", action: { kind: "tab", tab: "Calendar" } },
   { id: "s2", icon: "checkmark-done-outline", label: "Tasks", action: { kind: "comingSoon" } },
   { id: "s3", icon: "restaurant-outline", label: "Meals", action: { kind: "comingSoon" } },
+  // Birthdays has an actual Phase 1 screen under HomeStack
   { id: "s4", icon: "gift-outline", label: "Birthdays", action: { kind: "comingSoon" } },
   { id: "s5", icon: "people-outline", label: "Family", action: { kind: "tab", tab: "Settings" } },
   { id: "s6", icon: "settings-outline", label: "Settings", action: { kind: "tab", tab: "Settings" } },
@@ -64,39 +56,45 @@ export default function HomeScreen() {
   const userName = "Mark";
   const familyName = "Robson";
 
-  const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
+  // This screen is mounted inside HomeStack (which itself is mounted under MainTabs).
+  // Switching tabs must go via the parent tab navigator; navigating to Birthdays stays within HomeStack.
+  const navigation = useNavigation<BottomTabNavigationProp<any>>();
 
   const birthdayTicker = useBirthdayTickerLabel({ withinDays: 60, rotateWindowDays: 14, rotateEveryMs: 3500 });
-const onMenuPress = () => {
+
+  const onMenuPress = () => {
     // Placeholder for future “all features / menu”
     // Intentionally no navigation yet (Phase 1).
   };
 
-  const onShortcutPress = (item: ShortcutItem) => {    // Birthdays is inside the Home stack so bottom tabs stay visible
+  const switchTab = (tab: keyof MainTabParamList) => {
+    const parent = (navigation as any).getParent?.();
+    if (parent && typeof parent.navigate === "function") {
+      parent.navigate(tab);
+      return;
+    }
+    // Fallback: if for any reason we're already in the tab navigator context.
+    (navigation as any).navigate(tab);
+  };
+
+  const onShortcutPress = (item: ShortcutItem) => {
+    // Birthdays is within HomeStack
     if (item.id === "s4") {
       (navigation as any).navigate("Birthdays");
       return;
     }
 
     if (item.action.kind === "tab") {
-      const parent = (navigation as any).getParent?.();
-      if (parent && typeof parent.navigate === "function") {
-        parent.navigate(item.action.tab);
-        return;
-      }
-      (navigation as any).navigate(item.action.tab);
+      switchTab(item.action.tab);
       return;
     }
+
     Alert.alert("Coming soon", `${item.label} is coming in a later phase.`);
   };
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView
-        style={styles.page}
-        contentContainerStyle={styles.pageContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView style={styles.page} contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
         {/* Top App Chrome (scrolls with page, not sticky) */}
         <View style={styles.topChrome}>
           <View style={styles.brandLeft}>
@@ -267,22 +265,21 @@ const styles = StyleSheet.create({
     borderColor: stylesVars.border,
     borderRadius: 18,
     paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 10,
-    marginBottom: 12,
+    paddingVertical: 14,
+    marginBottom: 14,
   },
   todayHeader: {
-    fontSize: 16,
+    fontSize: 15,
     lineHeight: 20,
     fontWeight: "700",
     color: stylesVars.ink,
     marginBottom: 10,
   },
   todayList: {
-    maxHeight: 180,
+    maxHeight: 190,
   },
   todayListContent: {
-    paddingBottom: 6,
+    paddingBottom: 4,
   },
   todayRow: {
     flexDirection: "row",
@@ -292,36 +289,35 @@ const styles = StyleSheet.create({
     borderTopColor: stylesVars.border,
   },
   todayIconWrap: {
-    width: 32,
+    width: 26,
     alignItems: "center",
-    justifyContent: "center",
     marginRight: 10,
   },
   todayTextWrap: {
     flex: 1,
   },
   todayTitle: {
-    fontSize: 15,
-    lineHeight: 19,
-    fontWeight: "600",
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "700",
     color: stylesVars.ink,
   },
   todaySubtitle: {
     marginTop: 2,
     fontSize: 13,
     lineHeight: 16,
-    fontWeight: "500",
+    fontWeight: "600",
     color: stylesVars.inkMuted,
   },
 
-  // Birthday indicator (single reserved line)
+  // Birthday line
   birthdayLineWrap: {
-    marginTop: 2,
-    marginBottom: 18,
+    marginBottom: 16,
+    paddingHorizontal: 2,
   },
   birthdayLine: {
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 16,
     fontWeight: "600",
     color: stylesVars.inkMuted,
   },
@@ -331,8 +327,8 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   shortcutsLabel: {
-    fontSize: 16,
-    lineHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: "700",
     color: stylesVars.ink,
     marginBottom: 10,
@@ -343,46 +339,33 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   shortcutTile: {
-    width: "31.5%", // 3 columns with space-between (locks 2×3 given 6 tiles)
-    minHeight: 88,
+    width: "31.5%",
     backgroundColor: stylesVars.card,
     borderWidth: 1,
     borderColor: stylesVars.border,
-    borderRadius: 16,
+    borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 10,
+    marginBottom: 10,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOpacity: 0.03,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 4 },
-      },
-      android: {
-        elevation: 1,
-      },
-    }),
   },
   shortcutIcon: {
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     borderRadius: 10,
-    backgroundColor: "#F2F3F6",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
   },
   shortcutText: {
-    fontSize: 12.5,
-    lineHeight: 16,
-    fontWeight: "600",
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: "700",
     color: stylesVars.ink,
   },
 
   bottomSpacer: {
-    height: 26,
+    height: Platform.OS === "ios" ? 26 : 18,
   },
 });

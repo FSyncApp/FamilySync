@@ -3,10 +3,10 @@ import { Platform } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Ionicons } from "@expo/vector-icons";
 
-import HomeScreen from "../screens/HomeScreen";
+import HomeStack from "./HomeStack";
 import CalendarScreen from "../screens/CalendarScreen";
-import SettingsScreen from "../screens/SettingsScreen";
 import MessagesStack from "./MessagesStack";
+import SettingsStack from "./SettingsStack";
 
 export type MainTabParamList = {
   Home: undefined;
@@ -76,11 +76,7 @@ export default function MainTabs(props: any) {
         tabBarIcon: ({ focused, size }) => {
           const name = tabIcon(route.name as keyof MainTabParamList);
           return (
-            <Ionicons
-              name={name as any}
-              size={size ?? 22}
-              color={focused ? colors.tint : colors.inkMuted}
-            />
+            <Ionicons name={name as any} size={size ?? 22} color={focused ? colors.tint : colors.inkMuted} />
           );
         },
         tabBarLabelStyle: {
@@ -101,10 +97,11 @@ export default function MainTabs(props: any) {
         tabBarHideOnKeyboard: true,
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
+      {/* Home is a stack so we can host Birthdays (Phase 1) without changing bottom tabs */}
+      <Tab.Screen name="Home" component={HomeStack} />
       <Tab.Screen name="Calendar" component={CalendarScreen} />
       <Tab.Screen name="Messages" component={MessagesStack} />
-      <Tab.Screen name="Settings" component={SettingsScreen} />
+      <Tab.Screen name="Settings" component={SettingsStack} />
     </Tab.Navigator>
   );
 }

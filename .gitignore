@@ -100,3 +100,9 @@ ios/Podfile.properties 2.json
 
 # Local patch artifacts
 _patches/
+
+# Local editor/patch backups
+*.bak.*
+
+# Local editor/patch backups
+*.bak.*
