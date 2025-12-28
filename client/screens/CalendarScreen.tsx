@@ -53,6 +53,7 @@ const WEEK_STARTS_ON_MONDAY = true;
 const STORAGE_KEY_RUNS = "fs.taxi.v1";
 const STORAGE_KEY_RUNS_PEOPLE = "fs.runs.people.v1";
 const STORAGE_KEY_SCHOOL = "fs.schoolHolidays.v1";
+const STORAGE_KEY_SCHOOL_YEAR_LABEL_MODE = "fs.calendar.schoolYearLabelMode.v1";
 
 type CalendarMode = "calendar" | "runs" | "holidays";
 
@@ -539,6 +540,15 @@ export default function CalendarScreen() {
       } catch {
       } finally {
         if (mounted) setRunsPeopleLoaded(true);
+      }
+    }
+
+    async function loadSchoolYearMode() {
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY_SCHOOL_YEAR_LABEL_MODE);
+        if (!mounted) return;
+        if (raw === "split" || raw === "single") setSchoolYearLabelMode(raw);
+      } catch {
       }
     }
 
