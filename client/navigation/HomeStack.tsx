@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 
 import HomeScreen from "../screens/HomeScreen";
 import BirthdaysScreen from "../screens/BirthdaysScreen";
+import BirthdayDetailScreen from "../screens/BirthdayDetailScreen";
 import BirthdaysEditScreen from "../screens/BirthdaysEditScreen";
 
 export type HomeStackParamList = {
@@ -11,7 +12,9 @@ export type HomeStackParamList = {
   BirthdaysEdit:
     | undefined
     | {
-        existing?: { name: string; relationship?: string; dateYYYYMMDD: string };
+        existing?: { name: string; relationship?: string; dateYYYYMMDD: string
+  BirthdayDetail: { id: string };
+};
       };
 };
 
@@ -31,6 +34,7 @@ export default function HomeStack() {
         component={BirthdaysEditScreen}
         options={{ title: "Edit birthday", headerBackTitleVisible: false }}
       />
+      <Stack.Screen name="BirthdayDetail" component={BirthdayDetailScreen} options={{ title: "Birthday" }} />
     </Stack.Navigator>
   );
 }

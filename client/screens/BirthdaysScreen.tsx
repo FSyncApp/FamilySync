@@ -11,7 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
-import { formatDisplayDMY, parseYYYYMMDD } from "../components/DatePickerModal";
+import { parseYYYYMMDD } from "../components/DatePickerModal";
 import { getBirthdays, subscribeBirthdays, type Birthday } from "../data/birthdaysStore";
 import type { HomeStackParamList } from "../navigation/HomeStack";
 
@@ -39,6 +39,11 @@ function daysBetween(a: Date, b: Date) {
 
 function turnsAgeOnNextBirthday(dob: Date, next: Date) {
   return next.getFullYear() - dob.getFullYear();
+}
+
+function formatDisplayDM(date: Date) {
+  // Day + short month (no year) for compactness in list
+  return date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
 }
 
 type TabKey = "NEXT" | "AZ";
@@ -82,13 +87,15 @@ export default function BirthdaysScreen() {
   const openAdd = () => navigation.navigate("BirthdaysEdit", undefined);
   const openEdit = (b: Birthday) => navigation.navigate("BirthdaysEdit", { existing: b });
 
+  const openDetail = (b: Birthday) => navigation.navigate("BirthdayDetail", { id: b.id });
+
   const formatMeta = (b: any) => {
     if (tab === "NEXT") {
-      if (b._days === 0) return `Today • ${formatDisplayDMY(b._next)}`;
-      if (b._days === 1) return `Tomorrow • ${formatDisplayDMY(b._next)}`;
-      return `In ${b._days} days • ${formatDisplayDMY(b._next)}`;
+      if (b._days === 0) return `Today • ${formatDisplayDM(b._next)}`;
+      if (b._days === 1) return `Tomorrow • ${formatDisplayDM(b._next)}`;
+      return `In ${b._days} days • ${formatDisplayDM(b._next)}`;
     }
-    return formatDisplayDMY(b._next);
+    return formatDisplayDM(b._next);
   };
 
   const renderRow = (b: any) => {
@@ -97,9 +104,13 @@ export default function BirthdaysScreen() {
     return (
       <TouchableOpacity
         key={b.id}
-        onPress={() => openEdit(b)}
+        onPress={() => openDetail(b)}
+        onLongPress={() => openEdit(b)}
+        delayLongPress={350}
         activeOpacity={0.85}
         style={styles.row}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${b.name} birthday details`}
       >
         <View style={styles.iconWrap}>
           <Ionicons
@@ -188,10 +199,9 @@ export default function BirthdaysScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Coming soon</Text>
-          <Text style={styles.placeholder}>Reminders / notifications</Text>
-          <Text style={styles.placeholder}>Card / gift tracking</Text>
-          <Text style={styles.placeholder}>Shared status (e.g. “card sent”)</Text>
+          <Text style={styles.cardTitle}>Tip</Text>
+          <Text style={styles.placeholder}>Tap a person to open birthday details.</Text>
+          <Text style={styles.placeholder}>Long-press a person to edit their birthday.</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -264,30 +274,28 @@ const styles = StyleSheet.create({
     backgroundColor: vars.card,
     borderWidth: 1,
     borderColor: vars.border,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    borderRadius: 16,
+    padding: 14,
     marginBottom: 12,
   },
-  cardTitle: { fontSize: 16, lineHeight: 20, fontWeight: "700", color: vars.ink, marginBottom: 10 },
+  cardTitle: { fontSize: 14, fontWeight: "900", color: vars.ink, marginBottom: 10 },
 
-  row: { flexDirection: "row", alignItems: "center", paddingVertical: 10 },
-  iconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "#F2F3F7",
+  placeholder: { fontSize: 13, fontWeight: "700", color: vars.inkMuted, marginTop: 6 },
+
+  row: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
+    justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: vars.border,
   },
+
+  iconWrap: { width: 28, alignItems: "center" },
   textWrap: { flex: 1 },
-
-  nameLine: { flexDirection: "row", alignItems: "baseline" },
-  name: { fontSize: 16, lineHeight: 20, fontWeight: "900", color: vars.ink },
-  turns: { fontSize: 14, lineHeight: 18, fontWeight: "800", color: vars.inkMuted },
-
-  meta: { fontSize: 13, lineHeight: 18, fontWeight: "700", color: vars.inkMuted, marginTop: 2 },
-
-  placeholder: { fontSize: 14, lineHeight: 18, fontWeight: "700", color: vars.inkMuted, marginTop: 8 },
+  nameLine: { flexDirection: "row", alignItems: "baseline", gap: 6 },
+  name: { fontSize: 16, fontWeight: "900", color: vars.ink, flexShrink: 1 },
+  turns: { fontSize: 13, fontWeight: "800", color: vars.inkMuted },
+  meta: { marginTop: 4, fontSize: 13, fontWeight: "700", color: vars.inkMuted },
 });
