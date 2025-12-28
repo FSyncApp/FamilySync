@@ -13,7 +13,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { MessagesStackParamList } from "../navigation/MessagesStack";
 import { DEMO_CONVERSATIONS } from "../data/messagesDemo";
 
-type Nav = NativeStackNavigationProp<MessagesStackParamList, "MessagesList">;
+type Nav = NativeStackNavigationProp<MessagesStackParamList, "ChatsList">;
 
 // Phase 1: demo-only list. Flip to false to see empty state.
 const USE_DEMO_DATA = true;
@@ -31,7 +31,7 @@ export default function MessagesScreen() {
       <SafeAreaView style={styles.screen}>
         <View style={styles.emptyWrap}>
           <View style={styles.illustration} />
-          <Text style={styles.emptyTitle}>No messages yet</Text>
+          <Text style={styles.emptyTitle}>No chats yet</Text>
           <Text style={styles.emptyBody}>
             Family conversations will appear here.{"\n"}
             This is where you’ll chat, plan, and coordinate together.
@@ -71,9 +71,16 @@ export default function MessagesScreen() {
 
             <View style={styles.rowCenter}>
               <View style={styles.rowTopLine}>
-                <Text style={styles.title} numberOfLines={1}>
-                  {item.title}
-                </Text>
+                <View style={styles.titleWrap}>
+                  <Text style={styles.title} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  {item.isPinned ? (
+                    <View style={styles.pinnedPill}>
+                      <Text style={styles.pinnedText}>Pinned</Text>
+                    </View>
+                  ) : null}
+                </View>
                 <Text style={styles.time} numberOfLines={1}>
                   {item.lastMessageAtLabel}
                 </Text>
@@ -102,37 +109,37 @@ const styles = StyleSheet.create({
   separator: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: "#E6E6EA",
-    marginLeft: 84,
+    marginLeft: 78,
   },
 
   row: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   rowPressed: {
-    opacity: 0.7,
+    backgroundColor: "#F6F7FA",
   },
 
   avatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: "#F0F2F7",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 16,
+    marginRight: 14,
   },
   avatarText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700",
     color: "#4A4A4A",
   },
 
   rowCenter: {
     flex: 1,
-    minHeight: 52,
+    minHeight: 48,
     justifyContent: "center",
   },
   rowTopLine: {
@@ -141,18 +148,35 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 8,
   },
+  titleWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
   title: {
     flex: 1,
-    fontSize: 17,
-    fontWeight: "600",
+    fontSize: 16,
+    fontWeight: "700",
     color: "#111111",
   },
+  pinnedPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: "#F0F2F7",
+  },
+  pinnedText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#6B6B6B",
+  },
   time: {
-    fontSize: 13,
+    fontSize: 12,
     color: "#6B6B6B",
   },
   preview: {
-    marginTop: 4,
+    marginTop: 3,
     fontSize: 14,
     color: "#6B6B6B",
   },

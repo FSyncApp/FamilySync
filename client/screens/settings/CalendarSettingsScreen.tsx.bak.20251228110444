@@ -1,0 +1,198 @@
+import React from "react";
+import { Pressable, SafeAreaView, ScrollView, Text, TextInput, View } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+/**
+ * CalendarSettingsScreen (Phase 1)
+ * - Local-only settings for Calendar-related scaffolds.
+ * - Currently: manage School runs people list (used by "Who’s doing the run?" ActionSheet).
+ * - Future (Phase 1+): academic year display preference, calendar sync toggles, etc.
+ */
+
+function SectionTitle({ title, subtitle }: { title: string; subtitle?: string }) {
+  return (
+    <View style={{ paddingHorizontal: 2, marginBottom: 10 }}>
+      <Text style={{ fontSize: 16, fontWeight: "900", color: "#111827" }}>{title}</Text>
+      {!!subtitle ? (
+        <Text style={{ fontSize: 13, fontWeight: "700", color: "#6B7280", marginTop: 4 }}>{subtitle}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function Card({ children }: { children: React.ReactNode }) {
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: "#E6E8EE",
+        borderRadius: 18,
+        padding: 14,
+        backgroundColor: "#FFFFFF",
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+function SchoolRunsPeopleManager() {
+  const STORAGE_KEY_RUNS_PEOPLE = "fs.runs.people.v1";
+
+  const [people, setPeople] = React.useState<string[]>([]);
+  const [loaded, setLoaded] = React.useState(false);
+  const [newName, setNewName] = React.useState("");
+
+  React.useEffect(() => {
+    let mounted = true;
+    AsyncStorage.getItem(STORAGE_KEY_RUNS_PEOPLE)
+      .then((raw) => {
+        if (!mounted) return;
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed
+            .filter((x: any) => typeof x === "string")
+            .map((x: any) => String(x).trim())
+            .filter((x: string) => !!x && x.toLowerCase() !== "you")
+            .slice(0, 20);
+          setPeople(cleaned);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (mounted) setLoaded(true);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!loaded) return;
+    AsyncStorage.setItem(STORAGE_KEY_RUNS_PEOPLE, JSON.stringify(people)).catch(() => {});
+  }, [people, loaded]);
+
+  function add() {
+    const n = newName.trim();
+    if (!n) return;
+    setPeople((prev) => {
+      const exists = prev.some((p) => p.toLowerCase() === n.toLowerCase());
+      if (exists) return prev;
+      return [...prev, n].slice(0, 20);
+    });
+    setNewName("");
+  }
+
+  function remove(name: string) {
+    setPeople((prev) => prev.filter((p) => p !== name));
+  }
+
+  return (
+    <View>
+      {people.length === 0 ? (
+        <Text style={{ color: "#6B7280", marginBottom: 10 }}>
+          No extra people added yet.
+        </Text>
+      ) : (
+        people.map((p) => (
+          <View
+            key={p}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingVertical: 8,
+              borderTopWidth: 1,
+              borderTopColor: "#EEF0F4",
+            }}
+          >
+            <Text style={{ fontSize: 15, fontWeight: "700", color: "#111827" }}>{p}</Text>
+            <Pressable
+              onPress={() => remove(p)}
+              style={({ pressed }) => [
+                {
+                  paddingVertical: 6,
+                  paddingHorizontal: 10,
+                  borderRadius: 10,
+                  backgroundColor: "#F3F4F6",
+                },
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Text style={{ fontSize: 13, fontWeight: "800", color: "#111827" }}>Remove</Text>
+            </Pressable>
+          </View>
+        ))
+      )}
+
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 }}>
+        <View
+          style={{
+            flex: 1,
+            borderWidth: 1,
+            borderColor: "#E6E8EE",
+            borderRadius: 12,
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+          }}
+        >
+          <TextInput
+            value={newName}
+            onChangeText={setNewName}
+            placeholder="Add person…"
+            placeholderTextColor="#9CA3AF"
+            style={{ fontSize: 15, color: "#111827" }}
+            autoCapitalize="words"
+          />
+        </View>
+
+        <Pressable
+          onPress={add}
+          style={({ pressed }) => [
+            {
+              paddingVertical: 10,
+              paddingHorizontal: 12,
+              borderRadius: 12,
+              backgroundColor: "#111827",
+            },
+            pressed && { opacity: 0.85 },
+          ]}
+        >
+          <Text style={{ color: "#FFFFFF", fontWeight: "800" }}>Add</Text>
+        </Pressable>
+      </View>
+
+      <Text style={{ color: "#6B7280", marginTop: 10, fontSize: 12 }}>
+        Phase 1 local list. Later we’ll sync adults from your family.
+      </Text>
+    </View>
+  );
+}
+
+export default function CalendarSettingsScreen() {
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#F7F8FA" }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 28 }}>
+        <SectionTitle
+          title="Calendar"
+          subtitle="Local settings while Phase 1 is UI-only."
+        />
+
+        <Card>
+          <View style={{ marginBottom: 10 }}>
+            <Text style={{ fontSize: 15, fontWeight: "900", color: "#111827" }}>
+              School runs
+            </Text>
+            <Text style={{ fontSize: 13, fontWeight: "700", color: "#6B7280", marginTop: 4 }}>
+              People list for “Who’s doing the run?”
+            </Text>
+          </View>
+
+          <SchoolRunsPeopleManager />
+        </Card>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}

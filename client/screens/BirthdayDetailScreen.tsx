@@ -5,7 +5,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Switch,
   TextInput,
   TouchableOpacity,
 } from "react-native";
@@ -15,6 +14,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 
+import AppleSwitch from "../components/AppleSwitch";
 import { formatDisplayDMY } from "../components/DatePickerModal";
 import { getBirthdays, subscribeBirthdays, type Birthday } from "../data/birthdaysStore";
 import type { HomeStackParamList } from "../navigation/HomeStack";
@@ -53,7 +53,6 @@ function nextOccurrence(today: Date, month0: number, day: number) {
 }
 
 function parseYYYYMMDD(s: string) {
-  // Expected: "YYYY-MM-DD"
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return null;
   const y = Number(m[1]);
@@ -102,7 +101,6 @@ export default function BirthdayDetailScreen() {
   const [meta, setMeta] = useState<Meta>(defaultMeta());
   const [loaded, setLoaded] = useState(false);
 
-  // Load + reset toggles after birthday passes (simple yearly reset).
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -139,7 +137,7 @@ export default function BirthdayDetailScreen() {
       setLoaded(true);
     })();
     return () => {
-      alive = false;
+      alive = false
     };
   }, [id, birthday]);
 
@@ -206,9 +204,7 @@ export default function BirthdayDetailScreen() {
             activeOpacity={0.85}
           >
             <Text style={styles.title}>{birthday.name}</Text>
-            {birthday.relationship ? (
-              <Text style={styles.subtitle}>{birthday.relationship}</Text>
-            ) : null}
+            {birthday.relationship ? <Text style={styles.subtitle}>{birthday.relationship}</Text> : null}
           </TouchableOpacity>
         </View>
 
@@ -229,7 +225,7 @@ export default function BirthdayDetailScreen() {
               <Text style={styles.label}>Card sent</Text>
               <Text style={styles.hint}>Resets after birthday passes</Text>
             </View>
-            <Switch
+            <AppleSwitch
               value={!!meta.cardSent}
               onValueChange={(v) => persist({ cardSent: v })}
               accessibilityLabel="Card sent"
@@ -243,7 +239,7 @@ export default function BirthdayDetailScreen() {
               <Text style={styles.label}>Gift bought</Text>
               <Text style={styles.hint}>Resets after birthday passes</Text>
             </View>
-            <Switch
+            <AppleSwitch
               value={!!meta.giftBought}
               onValueChange={(v) => persist({ giftBought: v })}
               accessibilityLabel="Gift bought"

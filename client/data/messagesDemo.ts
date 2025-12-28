@@ -11,9 +11,17 @@ export type DemoConversation = {
   title: string;
   lastMessagePreview: string;
   lastMessageAtLabel: string;
+  isPinned?: boolean;
 };
 
 export const DEMO_CONVERSATIONS: DemoConversation[] = [
+  {
+    id: "announcements",
+    title: "Family Announcements",
+    lastMessagePreview: "Welcome to FamilySync — announcements will appear here.",
+    lastMessageAtLabel: "Today",
+    isPinned: true,
+  },
   {
     id: "family",
     title: "Robson Family",
@@ -29,6 +37,20 @@ export const DEMO_CONVERSATIONS: DemoConversation[] = [
 ];
 
 export const DEMO_MESSAGES: DemoMessage[] = [
+  {
+    id: "a1",
+    conversationId: "announcements",
+    sender: "FamilySync",
+    text: "Welcome to FamilySync. This space is for important family announcements (Phase 1 demo).",
+    createdAtISO: "2025-12-27T09:00:00.000Z",
+  },
+  {
+    id: "a2",
+    conversationId: "announcements",
+    sender: "FamilySync",
+    text: "Later, this can include reminders, birthdays, school changes, and key notices.",
+    createdAtISO: "2025-12-27T09:05:00.000Z",
+  },
   {
     id: "m1",
     conversationId: "family",

@@ -8,10 +8,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  Switch,
   View,
-  ActionSheetIOS,
-  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -23,24 +20,20 @@ import DatePickerModal, {
 } from "../components/DatePickerModal";
 
 /**
- * Calendar v1.5.2 (Phase 1 thin slice)
+ * Calendar v1.5.1 (Phase 1 thin slice)
  * - Internal mini-tabs within Calendar tab (LOCKED): Calendar | School runs | School holidays
- * - School runs v1 (Local MVP, persisted):
+ * - School runs (Taxi) v1 (Local MVP, persisted):
  *   - Add / view (week) / edit / delete pickup & drop-off entries
- *   - Category: School | Clubs | Other
+ *   - Category: School | Clubs | Other (Phase 1)
  *   - Date selection uses canonical DatePickerModal
  *   - Time is free-text (no new time picker in Phase 1)
- *   - Header label:
- *       - Current week => "This week"
- *       - Other weeks => date range only
  * - School holidays v1 (Local MVP, persisted):
  *   - Add / view (academic year) / edit / delete holiday ranges
- *   - Between arrows shows ONLY "YYYY/YYYY" (no extra date range)
  *   - Start/end date selection uses canonical DatePickerModal
- * - Calendar view remains primary; School runs / holidays auto-surface into Calendar day view (local-only).
+ * - Calendar view remains primary; now merges local School runs + School holidays into day sheet (local-only “sync”).
  *
  * Storage (AsyncStorage):
- *  - fs.taxi.v1        (kept for backward compatibility)
+ *  - fs.taxi.v1
  *  - fs.schoolHolidays.v1
  *
  * NOTE:
@@ -50,13 +43,12 @@ import DatePickerModal, {
 
 const WEEK_STARTS_ON_MONDAY = true;
 
-const STORAGE_KEY_RUNS = "fs.taxi.v1";
-const STORAGE_KEY_RUNS_PEOPLE = "fs.runs.people.v1";
+const STORAGE_KEY_TAXI = "fs.taxi.v1";
 const STORAGE_KEY_SCHOOL = "fs.schoolHolidays.v1";
 
-type CalendarMode = "calendar" | "runs" | "holidays";
+type CalendarMode = "calendar" | "taxi" | "school";
 
-/** Calendar demo items (dev only scaffold) */
+/** Calendar demo items (existing scaffold) */
 type ItemKind = "allDay" | "scheduled" | "task";
 type BaseItem = {
   id: string;
@@ -76,21 +68,21 @@ type ScheduledItem = BaseItem & {
 type TaskItem = BaseItem & { kind: "task" };
 type AnyItem = AllDayItem | ScheduledItem | TaskItem;
 
-/** School runs */
-type RunCategory = "school" | "clubs" | "other";
-type RunEntry = {
+/** School runs (Taxi) */
+type TaxiCategory = "School" | "Clubs" | "Other";
+type TaxiEntry = {
   id: string;
   type: "pickup" | "dropoff";
-  category: RunCategory;
   dateISO: string; // YYYY-MM-DD
   timeLabel?: string; // free text
   who: string;
+  category?: TaxiCategory; // optional for migration; default "School"
   notes?: string;
   createdAt: number;
   updatedAt: number;
 };
 
-/** School holidays */
+/** School Holidays */
 type SchoolHoliday = {
   id: string;
   name: string;
@@ -139,7 +131,12 @@ function addMonthsClamp(d: Date, deltaMonths: number) {
   const clampedDay = Math.min(day, lastDay);
 
   const result = new Date(targetYear, targetMonth, clampedDay);
-  result.setHours(d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds());
+  result.setHours(
+    d.getHours(),
+    d.getMinutes(),
+    d.getSeconds(),
+    d.getMilliseconds()
+  );
   return result;
 }
 
@@ -152,7 +149,10 @@ function startOfWeek(d: Date) {
 }
 
 function formatMonthYear(d: Date) {
-  return new Intl.DateTimeFormat(undefined, { month: "long", year: "numeric" }).format(d);
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    year: "numeric",
+  }).format(d);
 }
 
 function formatShortWeekday(d: Date) {
@@ -178,8 +178,14 @@ function formatDayShort(d: Date) {
 
 function formatWeekRangeLabel(weekStart: Date) {
   const weekEnd = addDays(weekStart, 6);
-  const startLabel = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(weekStart);
-  const endLabel = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(weekEnd);
+  const startLabel = new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+  }).format(weekStart);
+  const endLabel = new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+  }).format(weekEnd);
   return `${startLabel} – ${endLabel}`;
 }
 
@@ -211,10 +217,13 @@ function inferAcademicBaseYear(today: Date) {
   return m >= 7 ? y : y - 1;
 }
 
-function categoryLabel(c: RunCategory) {
-  if (c === "school") return "School";
-  if (c === "clubs") return "Clubs";
-  return "Other";
+function normalizeTaxiCategory(v?: TaxiCategory): TaxiCategory {
+  if (v === "School" || v === "Clubs" || v === "Other") return v;
+  return "School";
+}
+
+function toDisplayRunType(t: TaxiEntry["type"]) {
+  return t === "pickup" ? "Pickup" : "Drop-off";
 }
 
 export default function CalendarScreen() {
@@ -223,126 +232,61 @@ export default function CalendarScreen() {
 
   const [mode, setMode] = useState<CalendarMode>("calendar");
 
-  // Calendar details modal (demo items + local merged)
+  // NOTE: User-facing copy uses "School runs" (internal mode key remains "taxi").
+
+  // Calendar details modal (demo + local items)
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedItem, setSelectedItem] = useState<AnyItem | null>(null);
 
-  // Runs state
-  const currentRunsWeekStart = useMemo(() => startOfWeek(today), [today]);
-  const [runsWeekStart, setRunsWeekStart] = useState<Date>(currentRunsWeekStart);
-  const [runsEntries, setRunsEntries] = useState<RunEntry[]>([]);
-  const [runsLoaded, setRunsLoaded] = useState(false);
+  // School runs state
+  const [taxiWeekStart, setTaxiWeekStart] = useState<Date>(startOfWeek(today));
+  const currentTaxiWeekStart = useMemo(() => startOfWeek(today), [today]);
+  const [taxiEntries, setTaxiEntries] = useState<TaxiEntry[]>([]);
+  const [taxiLoaded, setTaxiLoaded] = useState(false);
 
-  // Runs modals
-  const [runsFormOpen, setRunsFormOpen] = useState(false);
-  const [runsEditingId, setRunsEditingId] = useState<string | null>(null);
+  // School runs modals
+  const [taxiFormOpen, setTaxiFormOpen] = useState(false);
+  const [taxiEditingId, setTaxiEditingId] = useState<string | null>(null);
 
-  const [runsType, setRunsType] = useState<"pickup" | "dropoff">("pickup");
-  const [runsCategory, setRunsCategory] = useState<RunCategory>("school");
-  const [runsDateISO, setRunsDateISO] = useState<string>(formatYYYYMMDD(today));
-  const [runsTimeLabel, setRunsTimeLabel] = useState<string>("");
-  const [runsWho, setRunsWho] = useState<string>("");
-  const [runsOtherSave, setRunsOtherSave] = useState(false);
+  const [taxiType, setTaxiType] = useState<"pickup" | "dropoff">("pickup");
+  const [taxiCategory, setTaxiCategory] = useState<TaxiCategory>("School");
+  const [taxiDateISO, setTaxiDateISO] = useState<string>(formatYYYYMMDD(today));
+  const [taxiTimeLabel, setTaxiTimeLabel] = useState<string>("");
+  const [taxiWho, setTaxiWho] = useState<string>("");
+  const [taxiNotes, setTaxiNotes] = useState<string>("");
 
+  const [taxiDatePickerOpen, setTaxiDatePickerOpen] = useState(false);
 
-  // "Who's doing the run?" (Phase 1): picker backed by local Settings list + "Other…"
-  const WHO_OTHER = "__OTHER__";
-  const [runsWhoChoice, setRunsWhoChoice] = useState<string>(""); // either a name, "You", or WHO_OTHER
-  const [runsWhoPickerOpen, setRunsWhoPickerOpen] = useState(false);
-  const [runsPeople, setRunsPeople] = useState<string[]>([]);
-  const [runsPeopleLoaded, setRunsPeopleLoaded] = useState(false);
+  const [taxiDetailsOpen, setTaxiDetailsOpen] = useState(false);
+  const [taxiSelectedId, setTaxiSelectedId] = useState<string | null>(null);
 
-
-  const [defaultWho, setDefaultWho] = useState<string>("You");
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function loadDefaultWho() {
-      const keys = [
-        "fs.profile.v1",
-        "fs.user.v1",
-        "fs.onboarding.v1",
-        "fs.onboarding.profile",
-        "fs.account.v1",
-        "fs.settings.v1",
-      ];
-
-      try {
-        const pairs = await AsyncStorage.multiGet(keys);
-
-        const pickName = (raw: string) => {
-          const s = (raw || "").trim();
-          if (!s) return "";
-          if (s.startsWith("{") || s.startsWith("[")) {
-            try {
-              const obj: any = JSON.parse(s);
-              if (obj && typeof obj === "object") {
-                const candidates = [
-                  obj.screenName,
-                  obj.fullName,
-                  obj.name,
-                  obj.displayName,
-                  obj.profile?.screenName,
-                  obj.profile?.fullName,
-                  obj.profile?.name,
-                ];
-                for (const c of candidates) {
-                  if (typeof c === "string" && c.trim()) return c.trim();
-                }
-              }
-            } catch {}
-            return "";
-          }
-          return s;
-        };
-
-        for (const [, raw] of pairs) {
-          if (!raw) continue;
-          const name = pickName(raw);
-          if (name) {
-            if (mounted) setDefaultWho(name);
-            return;
-          }
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    loadDefaultWho();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  const [runsNotes, setRunsNotes] = useState<string>("");
-
-  const [runsDatePickerOpen, setRunsDatePickerOpen] = useState(false);
-
-  const [runsDetailsOpen, setRunsDetailsOpen] = useState(false);
-  const [runsSelectedId, setRunsSelectedId] = useState<string | null>(null);
-
-  // Holidays state
-  const [schoolBaseYear, setSchoolBaseYear] = useState<number>(inferAcademicBaseYear(today));
+  // School state
+  const [schoolBaseYear, setSchoolBaseYear] = useState<number>(
+    inferAcademicBaseYear(today)
+  );
   const [schoolHolidays, setSchoolHolidays] = useState<SchoolHoliday[]>([]);
   const [schoolLoaded, setSchoolLoaded] = useState(false);
 
-  // Holidays modals
+  // School modals
   const [holidayFormOpen, setHolidayFormOpen] = useState(false);
   const [holidayEditingId, setHolidayEditingId] = useState<string | null>(null);
 
   const [holidayName, setHolidayName] = useState<string>("");
-  const [holidayStartISO, setHolidayStartISO] = useState<string>(formatYYYYMMDD(today));
-  const [holidayEndISO, setHolidayEndISO] = useState<string>(formatYYYYMMDD(today));
+  const [holidayStartISO, setHolidayStartISO] = useState<string>(
+    formatYYYYMMDD(today)
+  );
+  const [holidayEndISO, setHolidayEndISO] = useState<string>(
+    formatYYYYMMDD(today)
+  );
   const [holidayNotes, setHolidayNotes] = useState<string>("");
 
   const [holidayStartPickerOpen, setHolidayStartPickerOpen] = useState(false);
   const [holidayEndPickerOpen, setHolidayEndPickerOpen] = useState(false);
 
   const [holidayDetailsOpen, setHolidayDetailsOpen] = useState(false);
-  const [holidaySelectedId, setHolidaySelectedId] = useState<string | null>(null);
+  const [holidaySelectedId, setHolidaySelectedId] = useState<string | null>(
+    null
+  );
 
   // Calendar demo items (dev only)
   const devItems = useMemo<AnyItem[]>(() => {
@@ -380,7 +324,7 @@ export default function CalendarScreen() {
     ];
   }, []);
 
-  // Calendar week/day context
+  // Calendar week/day context (existing scaffold)
   const weekStart = useMemo(() => startOfWeek(selectedDate), [selectedDate]);
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
@@ -388,157 +332,159 @@ export default function CalendarScreen() {
   );
   const monthLabel = useMemo(() => formatMonthYear(selectedDate), [selectedDate]);
 
-  // Runs derived
-  const runsWeekDays = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => addDays(runsWeekStart, i)),
-    [runsWeekStart]
+  // Taxi derived (week)
+  const taxiWeekDays = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => addDays(taxiWeekStart, i)),
+    [taxiWeekStart]
   );
-  const runsWeekEntries = useMemo(() => {
-    const startISO = formatYYYYMMDD(runsWeekStart);
-    const endISO = formatYYYYMMDD(addDays(runsWeekStart, 6));
-    return runsEntries.filter((e) => e.dateISO >= startISO && e.dateISO <= endISO);
-  }, [runsEntries, runsWeekStart]);
+  const taxiWeekEntries = useMemo(() => {
+    const startISO = formatYYYYMMDD(taxiWeekStart);
+    const endISO = formatYYYYMMDD(addDays(taxiWeekStart, 6));
+    return taxiEntries.filter((e) => e.dateISO >= startISO && e.dateISO <= endISO);
+  }, [taxiEntries, taxiWeekStart]);
 
-  const runsEntriesByDay = useMemo(() => {
+  const taxiEntriesByDay = useMemo(() => {
     const map: Record<
       string,
-      { pickup: RunEntry[]; dropoff: RunEntry[] }
+      { pickup: TaxiEntry[]; dropoff: TaxiEntry[] }
     > = {};
-    for (const d of runsWeekDays) map[formatYYYYMMDD(d)] = { pickup: [], dropoff: [] };
-    for (const e of runsWeekEntries) {
-      if (!map[e.dateISO]) map[e.dateISO] = { pickup: [], dropoff: [] };
-      map[e.dateISO][e.type].push(e);
+    for (const d of taxiWeekDays) {
+      map[formatYYYYMMDD(d)] = { pickup: [], dropoff: [] };
+    }
+    for (const e of taxiWeekEntries) {
+      const iso = e.dateISO;
+      if (!map[iso]) map[iso] = { pickup: [], dropoff: [] };
+      map[iso][e.type].push(e);
     }
     for (const iso of Object.keys(map)) {
-      map[iso].pickup.sort((a, b) => (a.timeLabel || "").localeCompare(b.timeLabel || ""));
-      map[iso].dropoff.sort((a, b) => (a.timeLabel || "").localeCompare(b.timeLabel || ""));
+      const byType = map[iso];
+      byType.pickup.sort((a, b) => (a.timeLabel || "").localeCompare(b.timeLabel || ""));
+      byType.dropoff.sort((a, b) => (a.timeLabel || "").localeCompare(b.timeLabel || ""));
     }
     return map;
-  }, [runsWeekEntries, runsWeekDays]);
+  }, [taxiWeekEntries, taxiWeekDays]);
 
-  const runsSelected = useMemo(
-    () => (runsSelectedId ? runsEntries.find((e) => e.id === runsSelectedId) || null : null),
-    [runsEntries, runsSelectedId]
+  const taxiSelected = useMemo(
+    () =>
+      taxiSelectedId
+        ? taxiEntries.find((e) => e.id === taxiSelectedId) || null
+        : null,
+    [taxiEntries, taxiSelectedId]
   );
 
-  const runsIsCurrentWeek = useMemo(
-    () => formatYYYYMMDD(runsWeekStart) === formatYYYYMMDD(currentRunsWeekStart),
-    [runsWeekStart, currentRunsWeekStart]
-  );
-  const runsHeaderSub = useMemo(
-    () => (runsIsCurrentWeek ? "This week" : formatWeekRangeLabel(runsWeekStart)),
-    [runsIsCurrentWeek, runsWeekStart]
-  );
-  const runsCenterLabel = runsHeaderSub;
-
-  // Holidays derived
+  // School derived
   const schoolYearLabel = useMemo(
     () => `${schoolBaseYear}/${schoolBaseYear + 1}`,
     [schoolBaseYear]
   );
+  const schoolYearRangeLabel = useMemo(() => {
+    const { start, end } = academicYearStartEnd(schoolBaseYear);
+    return `${formatDisplayFromYYYYMMDD(start)} – ${formatDisplayFromYYYYMMDD(end)}`;
+  }, [schoolBaseYear]);
+
   const schoolFiltered = useMemo(() => {
     const { start, end } = academicYearStartEnd(schoolBaseYear);
     return schoolHolidays
       .filter((h) => h.startISO >= start && h.startISO <= end)
       .sort((a, b) => compareISO(a.startISO, b.startISO));
   }, [schoolHolidays, schoolBaseYear]);
+
   const holidaySelected = useMemo(
-    () => (holidaySelectedId ? schoolHolidays.find((h) => h.id === holidaySelectedId) || null : null),
+    () =>
+      holidaySelectedId
+        ? schoolHolidays.find((h) => h.id === holidaySelectedId) || null
+        : null,
     [schoolHolidays, holidaySelectedId]
   );
 
-  // Auto-surface runs/holidays into Calendar day view (local-only, Phase 1)
-  const runsForSelectedDay = useMemo(() => {
-    const iso = formatYYYYMMDD(selectedDate);
-    return runsEntries
-      .filter((e) => e.dateISO === iso)
+  // Local “sync” into Calendar day sheet
+  const selectedISO = useMemo(
+    () => formatYYYYMMDD(startOfDay(selectedDate)),
+    [selectedDate]
+  );
+
+  const taxiForSelectedDate = useMemo(() => {
+    return taxiEntries
+      .filter((e) => e.dateISO === selectedISO)
       .slice()
       .sort((a, b) => (a.timeLabel || "").localeCompare(b.timeLabel || ""));
-  }, [runsEntries, selectedDate]);
+  }, [taxiEntries, selectedISO]);
 
-  const holidaysForSelectedDay = useMemo(() => {
-    const iso = formatYYYYMMDD(selectedDate);
-    return schoolHolidays.filter((h) => h.startISO <= iso && iso <= h.endISO);
-  }, [schoolHolidays, selectedDate]);
+  const holidaysForSelectedDate = useMemo(() => {
+    return schoolHolidays
+      .filter((h) => h.startISO <= selectedISO && h.endISO >= selectedISO)
+      .slice()
+      .sort((a, b) => compareISO(a.startISO, b.startISO));
+  }, [schoolHolidays, selectedISO]);
 
-  // Merge into calendar sections
-  const calendarAllDayItems = useMemo<AllDayItem[]>(() => {
-    const fromDev = devItems.filter((i): i is AllDayItem => i.kind === "allDay");
-    const fromHolidays: AllDayItem[] = holidaysForSelectedDay.map((h) => ({
-      id: `holiday_${h.id}_${formatYYYYMMDD(selectedDate)}`,
+  const localAllDayItems = useMemo<AllDayItem[]>(() => {
+    return holidaysForSelectedDate.map((h) => ({
+      id: `local-holiday-${h.id}-${selectedISO}`,
       kind: "allDay",
       title: h.name,
-      subtitle: "School holiday",
-      sourceLabel: "FamilySync",
+      subtitle: "School holidays",
+      sourceLabel: "FamilySync (local)",
       colorLabel: "Reserved",
       notes: h.notes || "",
     }));
-    return [...fromDev, ...fromHolidays];
-  }, [devItems, holidaysForSelectedDay, selectedDate]);
+  }, [holidaysForSelectedDate, selectedISO]);
 
-  const calendarScheduledItems = useMemo<ScheduledItem[]>(() => {
-    const fromDev = devItems.filter((i): i is ScheduledItem => i.kind === "scheduled");
-    const fromRuns: ScheduledItem[] = runsForSelectedDay.map((e) => ({
-      id: `run_${e.id}`,
-      kind: "scheduled",
-      timeLabel: safeLabel(e.timeLabel, "—"),
-      title: `${categoryLabel(e.category)} run · ${e.type === "pickup" ? "Pickup" : "Drop-off"}`,
-      subtitle: e.who,
-      sourceLabel: "FamilySync",
-      colorLabel: "Reserved",
-      notes: e.notes || "",
-    }));
-    return [...fromDev, ...fromRuns];
-  }, [devItems, runsForSelectedDay]);
+  const localScheduledItems = useMemo<ScheduledItem[]>(() => {
+    return taxiForSelectedDate.map((e) => {
+      const cat = normalizeTaxiCategory(e.category);
+      const timeLabel = safeLabel(e.timeLabel, "—");
+      return {
+        id: `local-run-${e.id}`,
+        kind: "scheduled",
+        timeLabel,
+        title: `School run · ${toDisplayRunType(e.type)} · ${e.who}`,
+        subtitle: cat,
+        sourceLabel: "FamilySync (local)",
+        colorLabel: "Reserved",
+        notes: e.notes || "",
+      };
+    });
+  }, [taxiForSelectedDate]);
 
-  const calendarTaskItems = useMemo<TaskItem[]>(() => devItems.filter((i): i is TaskItem => i.kind === "task"), [devItems]);
+  // Merge with demo items
+  const mergedAllDay = useMemo(() => {
+    const demoAllDay = devItems.filter((i): i is AllDayItem => i.kind === "allDay");
+    return [...localAllDayItems, ...demoAllDay];
+  }, [devItems, localAllDayItems]);
 
-  const calendarItemCount =
-    calendarAllDayItems.length + calendarScheduledItems.length + calendarTaskItems.length;
+  const mergedScheduled = useMemo(() => {
+    const demoScheduled = devItems.filter((i): i is ScheduledItem => i.kind === "scheduled");
+    return [...localScheduledItems, ...demoScheduled].sort((a, b) => a.timeLabel.localeCompare(b.timeLabel));
+  }, [devItems, localScheduledItems]);
+
+  const mergedTasks = useMemo(() => {
+    return devItems.filter((i): i is TaskItem => i.kind === "task");
+  }, [devItems]);
+
+  const calendarItemCount = mergedAllDay.length + mergedScheduled.length + mergedTasks.length;
 
   // Load persisted state (once)
   useEffect(() => {
     let mounted = true;
 
-    async function loadRuns() {
+    async function loadTaxi() {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY_RUNS);
+        const raw = await AsyncStorage.getItem(STORAGE_KEY_TAXI);
         if (!mounted) return;
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed)) {
-            // Backward compatibility: older entries might not have category; default to "school"
-            const normalized = (parsed as any[]).map((e) => ({
-              ...e,
-              category: (e.category as RunCategory) || "school",
-            }));
-            setRunsEntries(normalized as RunEntry[]);
+            // Migration: ensure category exists and is valid
+            const normalized = (parsed as any[]).map((x) => ({
+              ...x,
+              category: normalizeTaxiCategory(x.category),
+            })) as TaxiEntry[];
+            setTaxiEntries(normalized);
           }
         }
       } catch {
       } finally {
-        if (mounted) setRunsLoaded(true);
-      }
-    }
-
-    async function loadPeople() {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY_RUNS_PEOPLE);
-        if (!mounted) return;
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            const cleaned = (parsed as any[])
-              .filter((x) => typeof x === "string")
-              .map((s) => String(s).trim())
-              .filter((s) => !!s && s.toLowerCase() !== "you")
-              .slice(0, 20);
-            setRunsPeople(cleaned);
-          }
-        }
-      } catch {
-      } finally {
-        if (mounted) setRunsPeopleLoaded(true);
+        if (mounted) setTaxiLoaded(true);
       }
     }
 
@@ -556,8 +502,7 @@ export default function CalendarScreen() {
       }
     }
 
-    loadRuns();
-    loadPeople();
+    loadTaxi();
     loadSchool();
 
     return () => {
@@ -567,24 +512,21 @@ export default function CalendarScreen() {
 
   // Persist on change (after load)
   useEffect(() => {
-    if (!runsLoaded) return;
-    AsyncStorage.setItem(STORAGE_KEY_RUNS, JSON.stringify(runsEntries)).catch(() => {
-      Alert.alert("Couldn’t save changes", "Try again.");
-    });
-  }, [runsEntries, runsLoaded]);
-
-  useEffect(() => {
-    if (!runsPeopleLoaded) return;
-    AsyncStorage.setItem(STORAGE_KEY_RUNS_PEOPLE, JSON.stringify(runsPeople)).catch(() => {
-      Alert.alert("Couldn’t save changes", "Try again.");
-    });
-  }, [runsPeople, runsPeopleLoaded]);
+    if (!taxiLoaded) return;
+    AsyncStorage.setItem(STORAGE_KEY_TAXI, JSON.stringify(taxiEntries)).catch(
+      () => {
+        Alert.alert("Couldn’t save changes", "Try again.");
+      }
+    );
+  }, [taxiEntries, taxiLoaded]);
 
   useEffect(() => {
     if (!schoolLoaded) return;
-    AsyncStorage.setItem(STORAGE_KEY_SCHOOL, JSON.stringify(schoolHolidays)).catch(() => {
-      Alert.alert("Couldn’t save changes", "Try again.");
-    });
+    AsyncStorage.setItem(STORAGE_KEY_SCHOOL, JSON.stringify(schoolHolidays)).catch(
+      () => {
+        Alert.alert("Couldn’t save changes", "Try again.");
+      }
+    );
   }, [schoolHolidays, schoolLoaded]);
 
   // Calendar actions
@@ -617,7 +559,8 @@ export default function CalendarScreen() {
 
   const calendarModalMeta = useMemo(() => {
     if (!selectedItem) return "";
-    if (selectedItem.kind === "allDay") return `${formatDayShort(selectedDate)} · All-day`;
+    if (selectedItem.kind === "allDay")
+      return `${formatDayShort(selectedDate)} · All-day`;
     if (selectedItem.kind === "scheduled") {
       const end = selectedItem.endTimeLabel ? `–${selectedItem.endTimeLabel}` : "";
       const time =
@@ -629,158 +572,102 @@ export default function CalendarScreen() {
     return `${formatDayShort(selectedDate)} · Task (due)`;
   }, [selectedItem, selectedDate]);
 
-  // Runs actions
-  function runsPrevWeek() {
-    setRunsWeekStart((prev) => startOfDay(addDays(prev, -7)));
+  // School runs actions
+  function taxiPrevWeek() {
+    setTaxiWeekStart((prev) => startOfDay(addDays(prev, -7)));
   }
-  function runsNextWeek() {
-    setRunsWeekStart((prev) => startOfDay(addDays(prev, 7)));
+  function taxiNextWeek() {
+    setTaxiWeekStart((prev) => startOfDay(addDays(prev, 7)));
   }
-  function runsToThisWeek() {
-    setRunsWeekStart(currentRunsWeekStart);
-  }
-
-  function openRunsAdd() {
-    setRunsEditingId(null);
-    setRunsType("pickup");
-    setRunsCategory("school");
-    setRunsDateISO(formatYYYYMMDD(startOfDay(runsWeekStart)));
-    setRunsTimeLabel("");
-    setRunsWho("");
-    setRunsWhoChoice(defaultWho && defaultWho.trim() ? defaultWho : "You");
-    setRunsOtherSave(false);
-    setRunsNotes("");
-    setRunsFormOpen(true);
+  function taxiThisWeek() {
+    setTaxiWeekStart(startOfWeek(today));
   }
 
-  function openRunsEdit(entry: RunEntry) {
-    setRunsEditingId(entry.id);
-    setRunsType(entry.type);
-    setRunsCategory(entry.category || "school");
-    setRunsDateISO(entry.dateISO);
-    setRunsTimeLabel(entry.timeLabel || "");
-    setRunsWho(entry.who);
-    {
-      const w = (entry.who || "").trim();
-      const isPreset = !!w && (w.toLowerCase() === "you" || runsPeople.some((p) => p.toLowerCase() === w.toLowerCase()) || (defaultWho && defaultWho.toLowerCase() === w.toLowerCase()));
-      setRunsWhoChoice(isPreset ? (w || "You") : WHO_OTHER);
-    }
-    setRunsOtherSave(false);
-    setRunsNotes(entry.notes || "");
-    setRunsFormOpen(true);
+  function openTaxiAdd() {
+    setTaxiEditingId(null);
+    setTaxiType("pickup");
+    setTaxiCategory("School");
+    setTaxiDateISO(formatYYYYMMDD(startOfDay(taxiWeekStart)));
+    setTaxiTimeLabel("");
+    setTaxiWho("");
+    setTaxiNotes("");
+    setTaxiFormOpen(true);
   }
 
-  
-  function openWhoPicker() {
-    const options = ["You", ...runsPeople, "Other…", "Cancel"];
-    const cancelButtonIndex = options.length - 1;
-    const otherIndex = options.length - 2;
-
-    if (Platform.OS === "ios") {
-      ActionSheetIOS.showActionSheetWithOptions(
-        {
-          options,
-          cancelButtonIndex,
-          title: "Who’s doing the run?",
-        },
-        (buttonIndex) => {
-          if (buttonIndex === cancelButtonIndex) return;
-          if (buttonIndex === otherIndex) {
-            setRunsWhoChoice(WHO_OTHER);
-            setRunsWho("");
-            setRunsOtherSave(false);
-            return;
-          }
-          const choice = options[buttonIndex] || "You";
-          setRunsWhoChoice(choice);
-          setRunsWho("");
-          setRunsOtherSave(false);
-        }
-      );
-      return;
-    }
-
-    // Android fallback: keep existing modal picker (if present)
-    setRunsWhoPickerOpen(true);
+  function openTaxiEdit(entry: TaxiEntry) {
+    setTaxiEditingId(entry.id);
+    setTaxiType(entry.type);
+    setTaxiCategory(normalizeTaxiCategory(entry.category));
+    setTaxiDateISO(entry.dateISO);
+    setTaxiTimeLabel(entry.timeLabel || "");
+    setTaxiWho(entry.who);
+    setTaxiNotes(entry.notes || "");
+    setTaxiFormOpen(true);
   }
 
-function saveRunEntry() {
-    const picked = (runsWhoChoice || "").trim();
-    const who = picked === WHO_OTHER ? runsWho.trim() : picked;
-    const dateISO = runsDateISO;
+  function saveTaxiEntry() {
+    const who = taxiWho.trim();
+    const dateISO = taxiDateISO;
     if (!who) return;
 
-    // If "Other…" and user opted to save, add to local people list (Phase 1)
-    if (runsWhoChoice === WHO_OTHER && runsOtherSave) {
-      const n = who.trim();
-      if (n && n.toLowerCase() !== "you") {
-        setRunsPeople((prev) => {
-          const exists = prev.some((p) => p.toLowerCase() === n.toLowerCase());
-          if (exists) return prev;
-          return [...prev, n].slice(0, 20);
-        });
-      }
-    }
-
-
     const now = Date.now();
-    if (runsEditingId) {
-      setRunsEntries((prev) =>
+    if (taxiEditingId) {
+      setTaxiEntries((prev) =>
         prev.map((e) =>
-          e.id === runsEditingId
+          e.id === taxiEditingId
             ? {
                 ...e,
-                type: runsType,
-                category: runsCategory,
+                type: taxiType,
+                category: taxiCategory,
                 dateISO,
-                timeLabel: runsTimeLabel.trim() || undefined,
+                timeLabel: taxiTimeLabel.trim() || undefined,
                 who,
-                notes: runsNotes.trim() || undefined,
+                notes: taxiNotes.trim() || undefined,
                 updatedAt: now,
               }
             : e
         )
       );
     } else {
-      const entry: RunEntry = {
-        id: genId("run"),
-        type: runsType,
-        category: runsCategory,
+      const entry: TaxiEntry = {
+        id: genId("taxi"),
+        type: taxiType,
+        category: taxiCategory,
         dateISO,
-        timeLabel: runsTimeLabel.trim() || undefined,
+        timeLabel: taxiTimeLabel.trim() || undefined,
         who,
-        notes: runsNotes.trim() || undefined,
+        notes: taxiNotes.trim() || undefined,
         createdAt: now,
         updatedAt: now,
       };
-      setRunsEntries((prev) => [entry, ...prev]);
+      setTaxiEntries((prev) => [entry, ...prev]);
     }
-    setRunsFormOpen(false);
+    setTaxiFormOpen(false);
   }
 
-  function confirmDeleteRun(entry: RunEntry) {
+  function confirmDeleteTaxi(entry: TaxiEntry) {
     Alert.alert("Delete entry?", "This will remove it from your schedule.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: () => {
-          setRunsEntries((prev) => prev.filter((e) => e.id !== entry.id));
-          setRunsDetailsOpen(false);
-          setRunsSelectedId(null);
+          setTaxiEntries((prev) => prev.filter((e) => e.id !== entry.id));
+          setTaxiDetailsOpen(false);
+          setTaxiSelectedId(null);
         },
       },
     ]);
   }
 
-  // Holidays actions
-  function holidaysPrevYear() {
+  // School actions
+  function schoolPrevYear() {
     setSchoolBaseYear((y) => y - 1);
   }
-  function holidaysNextYear() {
+  function schoolNextYear() {
     setSchoolBaseYear((y) => y + 1);
   }
-  function holidaysToThisYear() {
+  function schoolThisYear() {
     setSchoolBaseYear(inferAcademicBaseYear(today));
   }
 
@@ -863,13 +750,13 @@ function saveRunEntry() {
   const scrollBottomPadding = useMemo(() => MODE_BAR_HEIGHT + 22, []);
 
   // Helpers: open details
-  function openRunDetails(id: string) {
-    setRunsSelectedId(id);
-    setRunsDetailsOpen(true);
+  function openTaxiDetails(id: string) {
+    setTaxiSelectedId(id);
+    setTaxiDetailsOpen(true);
   }
-  function closeRunDetails() {
-    setRunsDetailsOpen(false);
-    setTimeout(() => setRunsSelectedId(null), 200);
+  function closeTaxiDetails() {
+    setTaxiDetailsOpen(false);
+    setTimeout(() => setTaxiSelectedId(null), 200);
   }
   function openHolidayDetails(id: string) {
     setHolidaySelectedId(id);
@@ -880,15 +767,7 @@ function saveRunEntry() {
     setTimeout(() => setHolidaySelectedId(null), 200);
   }
 
-  function ModeButton({
-    top,
-    bottom,
-    value,
-  }: {
-    top: string;
-    bottom?: string;
-    value: CalendarMode;
-  }) {
+  function ModeButton({ label, value }: { label: string; value: CalendarMode }) {
     const selected = mode === value;
     return (
       <Pressable
@@ -899,11 +778,8 @@ function saveRunEntry() {
           pressed && styles.pressed,
         ]}
       >
-        <Text
-          style={[styles.modeBarText, selected && styles.modeBarTextSelected]}
-          numberOfLines={2}
-        >
-          {bottom ? `${top}\n${bottom}` : top}
+        <Text style={[styles.modeBarText, selected && styles.modeBarTextSelected]}>
+          {label}
         </Text>
       </Pressable>
     );
@@ -1008,10 +884,10 @@ function saveRunEntry() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>All-day</Text>
-            {calendarAllDayItems.length === 0 ? (
+            {mergedAllDay.length === 0 ? (
               <Text style={styles.emptyText}>No all-day items</Text>
             ) : (
-              calendarAllDayItems.map((it) => (
+              mergedAllDay.map((it) => (
                 <Pressable
                   key={it.id}
                   onPress={() => openCalendarDetails(it)}
@@ -1031,10 +907,10 @@ function saveRunEntry() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Scheduled</Text>
-            {calendarScheduledItems.length === 0 ? (
+            {mergedScheduled.length === 0 ? (
               <Text style={styles.emptyText}>Nothing scheduled</Text>
             ) : (
-              calendarScheduledItems.map((it) => (
+              mergedScheduled.map((it) => (
                 <Pressable
                   key={it.id}
                   onPress={() => openCalendarDetails(it)}
@@ -1054,10 +930,10 @@ function saveRunEntry() {
 
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Tasks</Text>
-            {calendarTaskItems.length === 0 ? (
+            {mergedTasks.length === 0 ? (
               <Text style={styles.emptyText}>No tasks due</Text>
             ) : (
-              calendarTaskItems.map((it) => (
+              mergedTasks.map((it) => (
                 <Pressable
                   key={it.id}
                   onPress={() => openCalendarDetails(it)}
@@ -1077,114 +953,118 @@ function saveRunEntry() {
     );
   }
 
-  function RunsView() {
+  function TaxiView() {
+    const rangeLabel = formatWeekRangeLabel(taxiWeekStart);
+    const isThisWeek = isSameDay(startOfWeek(taxiWeekStart), startOfWeek(today));
+
     return (
       <>
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.pageTitle}>School runs</Text>
+            <Text style={styles.pageSub}>{isThisWeek ? "This week" : rangeLabel}</Text>
           </View>
+          <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+            <Pressable
+              onPress={taxiThisWeek}
+              disabled={isThisWeek}
+              style={({ pressed }) => [
+                styles.smallGhostBtn,
+                isThisWeek && styles.disabledGhostBtn,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.smallGhostBtnText,
+                  isThisWeek && styles.disabledGhostBtnText,
+                ]}
+              >
+                This week
+              </Text>
+            </Pressable>
 
-          <Pressable
-            onPress={openRunsAdd}
-            style={({ pressed }) => [styles.smallPrimaryBtn, pressed && styles.pressed]}
-          >
-            <Text style={styles.smallPrimaryBtnText}>Add</Text>
-          </Pressable>
+            <Pressable
+              onPress={openTaxiAdd}
+              style={({ pressed }) => [styles.smallPrimaryBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.smallPrimaryBtnText}>Add</Text>
+            </Pressable>
+          </View>
         </View>
 
-        <View style={styles.runsNavRow}>
+        <View style={styles.centerNavRow}>
           <Pressable
-            onPress={runsPrevWeek}
+            onPress={taxiPrevWeek}
             style={({ pressed }) => [styles.weekNavBtn, pressed && styles.pressed]}
           >
             <Text style={styles.weekNavText}>‹</Text>
           </Pressable>
 
-          <View style={styles.centerNavLabel}>
-            <Text style={styles.centerNavLabelText}>{runsCenterLabel}</Text>
+          <View style={styles.centerNavLabelWrap}>
+            <Text style={styles.centerNavLabel}>{isThisWeek ? "This week" : rangeLabel}</Text>
           </View>
 
           <Pressable
-            onPress={runsNextWeek}
+            onPress={taxiNextWeek}
             style={({ pressed }) => [styles.weekNavBtn, pressed && styles.pressed]}
           >
             <Text style={styles.weekNavText}>›</Text>
           </Pressable>
-
-          <Pressable
-            onPress={runsToThisWeek}
-            style={({ pressed }) => [styles.thisBtn, pressed && styles.pressed]}
-          >
-            <Text style={styles.thisBtnText}>This week</Text>
-          </Pressable>
         </View>
 
-        {runsWeekDays.map((d) => {
+        {taxiWeekDays.map((d) => {
           const iso = formatYYYYMMDD(d);
-          const byType = runsEntriesByDay[iso] || { pickup: [], dropoff: [] };
+          const byType = taxiEntriesByDay[iso] || { pickup: [], dropoff: [] };
           const dayLabel = new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(d);
 
-          const hasAny = byType.pickup.length + byType.dropoff.length > 0;
+          const pickup = byType.pickup;
+          const dropoff = byType.dropoff;
+
+          // Compact summaries (to fit ~5 days per screen)
+          const pickupSummary = pickup.length
+            ? `${safeLabel(pickup[0].timeLabel, "—")} · ${pickup[0].who}${pickup.length > 1 ? `  (+${pickup.length - 1})` : ""}`
+            : "—";
+
+          const dropoffSummary = dropoff.length
+            ? `${safeLabel(dropoff[0].timeLabel, "—")} · ${dropoff[0].who}${dropoff.length > 1 ? `  (+${dropoff.length - 1})` : ""}`
+            : "—";
+
+          const hasAnything = pickup.length > 0 || dropoff.length > 0;
 
           return (
-            <View key={iso} style={styles.runsCard}>
-              <View style={styles.cardHeader}>
-                <Text style={styles.cardTitle}>{dayLabel}</Text>
-                <Text style={styles.cardMeta}>{formatDisplayDMY(d)}</Text>
+            <View key={iso} style={styles.compactCard}>
+              <View style={styles.compactCardHeader}>
+                <Text style={styles.compactCardTitle}>{dayLabel}</Text>
+                <Text style={styles.compactCardMeta}>{formatDisplayDMY(d)}</Text>
               </View>
 
-              {!hasAny ? (
-                <Text style={styles.cardEmptyCompact}>No runs</Text>
-              ) : (
+              {hasAnything ? (
                 <>
-                  <View style={styles.cardSection}>
-                    <Text style={styles.cardSectionTitle}>Pickup</Text>
-                    {byType.pickup.length === 0 ? (
-                      <Text style={styles.cardEmpty}>—</Text>
-                    ) : (
-                      byType.pickup.map((e) => (
-                        <Pressable
-                          key={e.id}
-                          onPress={() => openRunDetails(e.id)}
-                          style={({ pressed }) => [styles.rowCompact, pressed && styles.pressed]}
-                        >
-                          <Text style={styles.timeLabel}>{safeLabel(e.timeLabel, "—")}</Text>
-                          <View style={styles.rowMain}>
-                            <Text style={styles.rowTitle} numberOfLines={1}>
-                              {`${e.who} · ${categoryLabel(e.category)}`}
-                            </Text>
-                          </View>
-                        </Pressable>
-                      ))
-                    )}
-                  </View>
+                  <View style={styles.compactLines}>
+                <View style={styles.compactLine}>
+                  <Text style={styles.compactLabel}>Pickup</Text>
+                  <Text style={styles.compactValue}>{pickupSummary}</Text>
+                </View>
+                <View style={styles.compactLine}>
+                  <Text style={styles.compactLabel}>Drop-off</Text>
+                  <Text style={styles.compactValue}>{dropoffSummary}</Text>
+                </View>
+              </View>
 
-                  <View style={styles.sectionDividerThin} />
-
-                  <View style={styles.cardSection}>
-                    <Text style={styles.cardSectionTitle}>Drop-off</Text>
-                    {byType.dropoff.length === 0 ? (
-                      <Text style={styles.cardEmpty}>—</Text>
-                    ) : (
-                      byType.dropoff.map((e) => (
-                        <Pressable
-                          key={e.id}
-                          onPress={() => openRunDetails(e.id)}
-                          style={({ pressed }) => [styles.rowCompact, pressed && styles.pressed]}
-                        >
-                          <Text style={styles.timeLabel}>{safeLabel(e.timeLabel, "—")}</Text>
-                          <View style={styles.rowMain}>
-                            <Text style={styles.rowTitle} numberOfLines={1}>
-                              {`${e.who} · ${categoryLabel(e.category)}`}
-                            </Text>
-                          </View>
-                        </Pressable>
-                      ))
-                    )}
-                  </View>
-                </>
-              )}
+                  <View style={styles.compactActionsRow}>
+                  <Pressable
+                    onPress={() => {
+                      // Open first relevant entry for fast drill-down
+                      const first = pickup[0] || dropoff[0];
+                      if (first) openTaxiDetails(first.id);
+                    }}
+                    style={({ pressed }) => [styles.smallGhostBtn, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.smallGhostBtnText}>View</Text>
+                  </Pressable>
+                </View>
+              ) : null}
             </View>
           );
         })}
@@ -1192,56 +1072,62 @@ function saveRunEntry() {
     );
   }
 
+  function SchoolView() {
+    const isThisYear = schoolBaseYear === inferAcademicBaseYear(today);
 
-  useEffect(() => {
-    if (!runsFormOpen) return;
-    // Ensure picker has a default selection
-    if (!runsWhoChoice) {
-      setRunsWhoChoice(defaultWho && defaultWho.trim() ? defaultWho : "You");
-    }
-  }, [runsFormOpen]);
-
-  function HolidaysView() {
     return (
       <>
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={styles.pageTitle}>School holidays</Text>
-            <Text style={styles.pageSub}>Academic year</Text>
+            <Text style={styles.pageSub}>Academic year {schoolYearLabel}</Text>
           </View>
+          <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+            <Pressable
+              onPress={schoolThisYear}
+              disabled={isThisYear}
+              style={({ pressed }) => [
+                styles.smallGhostBtn,
+                isThisYear && styles.disabledGhostBtn,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.smallGhostBtnText,
+                  isThisYear && styles.disabledGhostBtnText,
+                ]}
+              >
+                This year
+              </Text>
+            </Pressable>
 
-          <Pressable
-            onPress={openHolidayAdd}
-            style={({ pressed }) => [styles.smallPrimaryBtn, pressed && styles.pressed]}
-          >
-            <Text style={styles.smallPrimaryBtnText}>Add</Text>
-          </Pressable>
+            <Pressable
+              onPress={openHolidayAdd}
+              style={({ pressed }) => [styles.smallPrimaryBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.smallPrimaryBtnText}>Add</Text>
+            </Pressable>
+          </View>
         </View>
 
-        <View style={styles.runsNavRow}>
+        <View style={styles.centerNavRow}>
           <Pressable
-            onPress={holidaysPrevYear}
+            onPress={schoolPrevYear}
             style={({ pressed }) => [styles.weekNavBtn, pressed && styles.pressed]}
           >
             <Text style={styles.weekNavText}>‹</Text>
           </Pressable>
 
-          <View style={styles.centerNavLabel}>
-            <Text style={styles.centerNavLabelText}>{schoolYearLabel}</Text>
+          <View style={styles.centerNavLabelWrap}>
+            <Text style={styles.centerNavLabel}>{schoolYearLabel}</Text>
           </View>
 
           <Pressable
-            onPress={holidaysNextYear}
+            onPress={schoolNextYear}
             style={({ pressed }) => [styles.weekNavBtn, pressed && styles.pressed]}
           >
             <Text style={styles.weekNavText}>›</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={holidaysToThisYear}
-            style={({ pressed }) => [styles.thisBtn, pressed && styles.pressed]}
-          >
-            <Text style={styles.thisBtnText}>This year</Text>
           </Pressable>
         </View>
 
@@ -1249,12 +1135,10 @@ function saveRunEntry() {
           <View style={styles.card}>
             <Text style={styles.cardEmpty}>No holidays added yet</Text>
           </View>
-        ) : (
-          schoolFiltered.map((h) => (
-            <Pressable
-              key={h.id}
-              onPress={() => openHolidayDetails(h.id)}
-              style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+                </>
+              ) : (
+                <Text style={styles.compactEmpty}>No runs</Text>
+              )}style={({ pressed }) => [styles.card, pressed && styles.pressed]}
             >
               <View style={styles.cardHeader}>
                 <Text style={styles.cardTitle}>{h.name}</Text>
@@ -1270,6 +1154,35 @@ function saveRunEntry() {
     );
   }
 
+  function CategoryPill({
+    value,
+    label,
+  }: {
+    value: TaxiCategory;
+    label: string;
+  }) {
+    const selected = taxiCategory === value;
+    return (
+      <Pressable
+        onPress={() => setTaxiCategory(value)}
+        style={({ pressed }) => [
+          styles.categoryPill,
+          selected && styles.categoryPillSelected,
+          pressed && styles.pressed,
+        ]}
+      >
+        <Text
+          style={[
+            styles.categoryPillText,
+            selected && styles.categoryPillTextSelected,
+          ]}
+        >
+          {label}
+        </Text>
+      </Pressable>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.root}>
@@ -1277,15 +1190,15 @@ function saveRunEntry() {
           contentContainerStyle={[styles.container, { paddingBottom: scrollBottomPadding }]}
         >
           {mode === "calendar" ? <CalendarView /> : null}
-          {mode === "runs" ? <RunsView /> : null}
-          {mode === "holidays" ? <HolidaysView /> : null}
+          {mode === "taxi" ? <TaxiView /> : null}
+          {mode === "school" ? <SchoolView /> : null}
         </ScrollView>
 
         <View style={styles.modeBarOuter}>
           <View style={styles.modeBarInner}>
-            <ModeButton top="Calendar" value="calendar" />
-            <ModeButton top="School" bottom="runs" value="runs" />
-            <ModeButton top="School" bottom="holidays" value="holidays" />
+            <ModeButton label="Calendar" value="calendar" />
+            <ModeButton label={"School\nruns"} value="taxi" />
+            <ModeButton label={"School\nholidays"} value="school" />
           </View>
         </View>
 
@@ -1344,37 +1257,35 @@ function saveRunEntry() {
           </SafeAreaView>
         </Modal>
 
-        {/* Runs form modal */}
+        {/* School runs form modal */}
         <Modal
-          visible={runsFormOpen}
+          visible={taxiFormOpen}
           animationType="slide"
           presentationStyle="pageSheet"
-          onRequestClose={() => setRunsFormOpen(false)}
+          onRequestClose={() => setTaxiFormOpen(false)}
         >
           <SafeAreaView style={styles.modalSafe}>
             <View style={styles.modalHeader}>
               <Pressable
-                onPress={() => setRunsFormOpen(false)}
+                onPress={() => setTaxiFormOpen(false)}
                 style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}
               >
                 <Text style={styles.headerBtnText}>Cancel</Text>
               </Pressable>
-              <Text style={styles.headerTitle}>
-                {runsEditingId ? "Edit run" : "Add run"}
-              </Text>
+              <Text style={styles.headerTitle}>{taxiEditingId ? "Edit run" : "Add run"}</Text>
               <Pressable
-                onPress={saveRunEntry}
-                disabled={!((runsWhoChoice && runsWhoChoice !== WHO_OTHER) || (runsWhoChoice === WHO_OTHER && runsWho.trim()))}
+                onPress={saveTaxiEntry}
+                disabled={!taxiWho.trim()}
                 style={({ pressed }) => [
                   styles.headerBtn,
-                  (!((runsWhoChoice && runsWhoChoice !== WHO_OTHER) || (runsWhoChoice === WHO_OTHER && runsWho.trim()))) && styles.disabledBtn,
+                  !taxiWho.trim() && styles.disabledBtn,
                   pressed && styles.pressed,
                 ]}
               >
                 <Text
                   style={[
                     styles.headerBtnText,
-                    (!((runsWhoChoice && runsWhoChoice !== WHO_OTHER) || (runsWhoChoice === WHO_OTHER && runsWho.trim()))) && styles.disabledBtnText,
+                    !taxiWho.trim() && styles.disabledBtnText,
                   ]}
                 >
                   Save
@@ -1387,34 +1298,34 @@ function saveRunEntry() {
                 <Text style={styles.formLabel}>Type</Text>
                 <View style={styles.segment}>
                   <Pressable
-                    onPress={() => setRunsType("pickup")}
+                    onPress={() => setTaxiType("pickup")}
                     style={({ pressed }) => [
                       styles.segmentItem,
-                      runsType === "pickup" && styles.segmentItemSelected,
+                      taxiType === "pickup" && styles.segmentItemSelected,
                       pressed && styles.pressed,
                     ]}
                   >
                     <Text
                       style={[
                         styles.segmentText,
-                        runsType === "pickup" && styles.segmentTextSelected,
+                        taxiType === "pickup" && styles.segmentTextSelected,
                       ]}
                     >
                       Pickup
                     </Text>
                   </Pressable>
                   <Pressable
-                    onPress={() => setRunsType("dropoff")}
+                    onPress={() => setTaxiType("dropoff")}
                     style={({ pressed }) => [
                       styles.segmentItem,
-                      runsType === "dropoff" && styles.segmentItemSelected,
+                      taxiType === "dropoff" && styles.segmentItemSelected,
                       pressed && styles.pressed,
                     ]}
                   >
                     <Text
                       style={[
                         styles.segmentText,
-                        runsType === "dropoff" && styles.segmentTextSelected,
+                        taxiType === "dropoff" && styles.segmentTextSelected,
                       ]}
                     >
                       Drop-off
@@ -1425,78 +1336,28 @@ function saveRunEntry() {
 
               <View style={styles.formSection}>
                 <Text style={styles.formLabel}>Category</Text>
-                <View style={styles.segment}>
-                  <Pressable
-                    onPress={() => setRunsCategory("school")}
-                    style={({ pressed }) => [
-                      styles.segmentItem,
-                      runsCategory === "school" && styles.segmentItemSelected,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentText,
-                        runsCategory === "school" && styles.segmentTextSelected,
-                      ]}
-                    >
-                      School
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setRunsCategory("clubs")}
-                    style={({ pressed }) => [
-                      styles.segmentItem,
-                      runsCategory === "clubs" && styles.segmentItemSelected,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentText,
-                        runsCategory === "clubs" && styles.segmentTextSelected,
-                      ]}
-                    >
-                      Clubs
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setRunsCategory("other")}
-                    style={({ pressed }) => [
-                      styles.segmentItem,
-                      runsCategory === "other" && styles.segmentItemSelected,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentText,
-                        runsCategory === "other" && styles.segmentTextSelected,
-                      ]}
-                    >
-                      Other
-                    </Text>
-                  </Pressable>
+                <View style={styles.categoryRow}>
+                  <CategoryPill value="School" label="School" />
+                  <CategoryPill value="Clubs" label="Clubs" />
+                  <CategoryPill value="Other" label="Other" />
                 </View>
               </View>
 
               <View style={styles.formSection}>
                 <Text style={styles.formLabel}>Date</Text>
                 <Pressable
-                  onPress={() => setRunsDatePickerOpen(true)}
+                  onPress={() => setTaxiDatePickerOpen(true)}
                   style={({ pressed }) => [styles.inputLike, pressed && styles.pressed]}
                 >
-                  <Text style={styles.inputLikeText}>
-                    {formatDisplayFromYYYYMMDD(runsDateISO)}
-                  </Text>
+                  <Text style={styles.inputLikeText}>{formatDisplayFromYYYYMMDD(taxiDateISO)}</Text>
                 </Pressable>
               </View>
 
               <View style={styles.formSection}>
                 <Text style={styles.formLabel}>Time (optional)</Text>
                 <TextInput
-                  value={runsTimeLabel}
-                  onChangeText={setRunsTimeLabel}
+                  value={taxiTimeLabel}
+                  onChangeText={setTaxiTimeLabel}
                   placeholder="15:20"
                   placeholderTextColor="#9CA3AF"
                   style={styles.textInput}
@@ -1504,44 +1365,21 @@ function saveRunEntry() {
               </View>
 
               <View style={styles.formSection}>
-                <Text style={styles.formLabel}>Who’s doing the run?</Text>
-
-                <Pressable
-                  onPress={openWhoPicker}
-                  style={({ pressed }) => [styles.inputLike, pressed && styles.pressed]}
-                >
-                  <Text style={styles.inputLikeText}>
-                    {runsWhoChoice === WHO_OTHER
-                      ? (runsWho.trim() ? runsWho.trim() : "Other…")
-                      : safeLabel(runsWhoChoice, "You")}
-                  </Text>
-                </Pressable>
-
-                {runsWhoChoice === WHO_OTHER ? (
-                  <View style={{ marginTop: 10 }}>
-                    <TextInput
-                      value={runsWho}
-                      onChangeText={setRunsWho}
-                      placeholder="Name"
-                      placeholderTextColor="#9CA3AF"
-                      style={styles.textInput}
-                    />
-
-                    <View style={styles.saveRow}>
-                      <Text style={styles.saveRowText}>
-                        Save this person for future use
-                      </Text>
-                      <Switch value={runsOtherSave} onValueChange={setRunsOtherSave} />
-                    </View>
-                  </View>
-                ) : null}
+                <Text style={styles.formLabel}>Who</Text>
+                <TextInput
+                  value={taxiWho}
+                  onChangeText={setTaxiWho}
+                  placeholder="e.g. Mark"
+                  placeholderTextColor="#9CA3AF"
+                  style={styles.textInput}
+                />
               </View>
 
               <View style={styles.formSection}>
                 <Text style={styles.formLabel}>Notes (optional)</Text>
                 <TextInput
-                  value={runsNotes}
-                  onChangeText={setRunsNotes}
+                  value={taxiNotes}
+                  onChangeText={setTaxiNotes}
                   placeholder="Optional"
                   placeholderTextColor="#9CA3AF"
                   style={[styles.textInput, { height: 90 }]}
@@ -1555,29 +1393,29 @@ function saveRunEntry() {
             </ScrollView>
 
             <DatePickerModal
-              visible={runsDatePickerOpen}
+              visible={taxiDatePickerOpen}
               title="Select date"
-              initialDate={parseYYYYMMDD(runsDateISO) || today}
-              onCancel={() => setRunsDatePickerOpen(false)}
+              initialDate={parseYYYYMMDD(taxiDateISO) || today}
+              onCancel={() => setTaxiDatePickerOpen(false)}
               onConfirm={(d) => {
-                setRunsDatePickerOpen(false);
-                setRunsDateISO(formatYYYYMMDD(startOfDay(d)));
+                setTaxiDatePickerOpen(false);
+                setTaxiDateISO(formatYYYYMMDD(startOfDay(d)));
               }}
             />
           </SafeAreaView>
         </Modal>
 
-        {/* Runs details modal */}
+        {/* School runs details modal */}
         <Modal
-          visible={runsDetailsOpen}
+          visible={taxiDetailsOpen}
           animationType="slide"
           presentationStyle="pageSheet"
-          onRequestClose={closeRunDetails}
+          onRequestClose={() => setTaxiDetailsOpen(false)}
         >
           <SafeAreaView style={styles.modalSafe}>
             <View style={styles.modalHeader}>
               <Pressable
-                onPress={closeRunDetails}
+                onPress={() => setTaxiDetailsOpen(false)}
                 style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}
               >
                 <Text style={styles.headerBtnText}>Done</Text>
@@ -1587,37 +1425,39 @@ function saveRunEntry() {
             </View>
 
             <ScrollView contentContainerStyle={styles.modalContent}>
-              {runsSelected ? (
+              {taxiSelected ? (
                 <>
                   <Text style={styles.modalTitle}>
-                    {categoryLabel(runsSelected.category)} ·{" "}
-                    {runsSelected.type === "pickup" ? "Pickup" : "Drop-off"} ·{" "}
-                    {runsSelected.who}
+                    {toDisplayRunType(taxiSelected.type)} · {taxiSelected.who}
                   </Text>
                   <Text style={styles.modalMeta}>
-                    {formatDisplayFromYYYYMMDD(runsSelected.dateISO)} ·{" "}
-                    {safeLabel(runsSelected.timeLabel, "—")}
+                    {formatDisplayFromYYYYMMDD(taxiSelected.dateISO)} · {safeLabel(taxiSelected.timeLabel, "—")}
                   </Text>
 
-                  {!!runsSelected.notes && (
+                  <View style={styles.detailCard}>
+                    <Text style={styles.detailLabel}>Category</Text>
+                    <Text style={styles.detailValue}>{normalizeTaxiCategory(taxiSelected.category)}</Text>
+                  </View>
+
+                  {!!taxiSelected.notes && (
                     <View style={styles.detailCard}>
                       <Text style={styles.detailLabel}>Notes</Text>
-                      <Text style={styles.detailValue}>{runsSelected.notes}</Text>
+                      <Text style={styles.detailValue}>{taxiSelected.notes}</Text>
                     </View>
                   )}
 
                   <View style={styles.actionRow}>
                     <Pressable
                       onPress={() => {
-                        setRunsDetailsOpen(false);
-                        openRunsEdit(runsSelected);
+                        setTaxiDetailsOpen(false);
+                        openTaxiEdit(taxiSelected);
                       }}
                       style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}
                     >
                       <Text style={styles.secondaryBtnText}>Edit</Text>
                     </Pressable>
                     <Pressable
-                      onPress={() => confirmDeleteRun(runsSelected)}
+                      onPress={() => confirmDeleteTaxi(taxiSelected)}
                       style={({ pressed }) => [styles.dangerBtn, pressed && styles.pressed]}
                     >
                       <Text style={styles.dangerBtnText}>Delete</Text>
@@ -1646,9 +1486,7 @@ function saveRunEntry() {
               >
                 <Text style={styles.headerBtnText}>Cancel</Text>
               </Pressable>
-              <Text style={styles.headerTitle}>
-                {holidayEditingId ? "Edit holiday" : "Add holiday"}
-              </Text>
+              <Text style={styles.headerTitle}>{holidayEditingId ? "Edit holiday" : "Add holiday"}</Text>
               <Pressable
                 onPress={saveHoliday}
                 disabled={!holidayName.trim() || !!holidayDateError}
@@ -1687,9 +1525,7 @@ function saveRunEntry() {
                   onPress={() => setHolidayStartPickerOpen(true)}
                   style={({ pressed }) => [styles.inputLike, pressed && styles.pressed]}
                 >
-                  <Text style={styles.inputLikeText}>
-                    {formatDisplayFromYYYYMMDD(holidayStartISO)}
-                  </Text>
+                  <Text style={styles.inputLikeText}>{formatDisplayFromYYYYMMDD(holidayStartISO)}</Text>
                 </Pressable>
               </View>
 
@@ -1699,9 +1535,7 @@ function saveRunEntry() {
                   onPress={() => setHolidayEndPickerOpen(true)}
                   style={({ pressed }) => [styles.inputLike, pressed && styles.pressed]}
                 >
-                  <Text style={styles.inputLikeText}>
-                    {formatDisplayFromYYYYMMDD(holidayEndISO)}
-                  </Text>
+                  <Text style={styles.inputLikeText}>{formatDisplayFromYYYYMMDD(holidayEndISO)}</Text>
                 </Pressable>
               </View>
 
@@ -1753,12 +1587,12 @@ function saveRunEntry() {
           visible={holidayDetailsOpen}
           animationType="slide"
           presentationStyle="pageSheet"
-          onRequestClose={closeHolidayDetails}
+          onRequestClose={() => setHolidayDetailsOpen(false)}
         >
           <SafeAreaView style={styles.modalSafe}>
             <View style={styles.modalHeader}>
               <Pressable
-                onPress={closeHolidayDetails}
+                onPress={() => setHolidayDetailsOpen(false)}
                 style={({ pressed }) => [styles.headerBtn, pressed && styles.pressed]}
               >
                 <Text style={styles.headerBtnText}>Done</Text>
@@ -1772,8 +1606,7 @@ function saveRunEntry() {
                 <>
                   <Text style={styles.modalTitle}>{holidaySelected.name}</Text>
                   <Text style={styles.modalMeta}>
-                    {formatDisplayFromYYYYMMDD(holidaySelected.startISO)} –{" "}
-                    {formatDisplayFromYYYYMMDD(holidaySelected.endISO)}
+                    {formatDisplayFromYYYYMMDD(holidaySelected.startISO)} – {formatDisplayFromYYYYMMDD(holidaySelected.endISO)}
                   </Text>
 
                   {!!holidaySelected.notes && (
@@ -1835,7 +1668,7 @@ const styles = StyleSheet.create({
   },
   modeBarItem: { flex: 1, alignItems: "center", justifyContent: "center" },
   modeBarItemSelected: { backgroundColor: "#121214" },
-  modeBarText: { fontSize: 13, fontWeight: "900", color: "#5F5F66", textAlign: "center", lineHeight: 15 },
+  modeBarText: { fontSize: 13, fontWeight: "800", color: "#5F5F66" },
   modeBarTextSelected: { color: "#FFFFFF" },
 
   monthHeader: {
@@ -1870,7 +1703,7 @@ const styles = StyleSheet.create({
   },
   modeItem: {
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 10,
     flexDirection: "row",
     alignItems: "baseline",
     gap: 6,
@@ -1883,7 +1716,7 @@ const styles = StyleSheet.create({
 
   todayBtn: {
     paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 10,
     borderRadius: 14,
     backgroundColor: "#F4F4F6",
   },
@@ -1904,7 +1737,7 @@ const styles = StyleSheet.create({
   dayCell: {
     flex: 1,
     borderRadius: 16,
-    paddingVertical: 6,
+    paddingVertical: 10,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#F7F7F9",
@@ -1918,13 +1751,7 @@ const styles = StyleSheet.create({
   todayDotPlaceholder: { width: 6, height: 6, borderRadius: 3, marginTop: 6, backgroundColor: "transparent" },
 
   daySheet: { borderRadius: 18, backgroundColor: "#F7F7F9", padding: 16 },
-  daySheetHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-    gap: 12,
-  },
+  daySheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 12 },
   dayTitle: { fontSize: 18, fontWeight: "800", flex: 1 },
   countPill: { backgroundColor: "#FFFFFF", borderRadius: 999, paddingHorizontal: 12, paddingVertical: 8 },
   countPillText: { fontSize: 13, fontWeight: "800", color: "#5F5F66" },
@@ -1934,26 +1761,7 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 14, color: "#7A7A83", lineHeight: 20, paddingBottom: 4 },
   sectionDivider: { height: 1, backgroundColor: "#E2E2E8", marginVertical: 14 },
 
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-    marginBottom: 8,
-  },
-  rowCompact: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-    marginBottom: 6,
-  },
+  row: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, paddingHorizontal: 10, borderRadius: 14, backgroundColor: "#FFFFFF", marginBottom: 8 },
   sourceBar: { width: 4, height: 32, borderRadius: 2, backgroundColor: "#D9D9DE" },
   timeLabel: { width: 54, fontSize: 13, fontWeight: "800", color: "#5F5F66" },
   taskDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: "#D9D9DE" },
@@ -1965,27 +1773,38 @@ const styles = StyleSheet.create({
   pageTitle: { fontSize: 22, fontWeight: "900", color: "#121214" },
   pageSub: { marginTop: 6, fontSize: 14, fontWeight: "700", color: "#7A7A83" },
 
-  runsNavRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
-  centerNavLabel: { flex: 1, alignItems: "center", justifyContent: "center" },
-  centerNavLabelText: { fontSize: 13, fontWeight: "900", color: "#5F5F66" },
-  thisBtn: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 14, backgroundColor: "#F4F4F6" },
-  thisBtnText: { fontSize: 13, fontWeight: "900", color: "#121214" },
+  centerNavRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 6 },
+  centerNavLabelWrap: { flex: 1, alignItems: "center" },
+  centerNavLabel: { fontSize: 13, fontWeight: "900", color: "#121214" },
+  centerNavSubLabel: { marginTop: 2, fontSize: 12, fontWeight: "800", color: "#7A7A83" },
+
+  // Compact Taxi cards
+  compactCard: { marginTop: 10, borderRadius: 18, backgroundColor: "#F7F7F9", padding: 12 },
+  compactCardHeader: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 8 },
+  compactCardTitle: { fontSize: 13, fontWeight: "900", color: "#121214", flex: 1 },
+  compactCardMeta: { fontSize: 11, fontWeight: "800", color: "#7A7A83" },
+
+  compactLines: { gap: 8 },
+  compactLine: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, backgroundColor: "#FFFFFF", borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12 },
+  compactLabel: { fontSize: 13, fontWeight: "900", color: "#5F5F66" },
+  compactValue: { fontSize: 13, fontWeight: "900", color: "#121214", textAlign: "right", flex: 1 },
+
+  compactActionsRow: { marginTop: 10, flexDirection: "row", justifyContent: "flex-end" },
 
   card: { marginTop: 12, borderRadius: 18, backgroundColor: "#F7F7F9", padding: 14 },
-  cardHeader: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 8 },
+  cardHeader: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10 },
   cardTitle: { fontSize: 14, fontWeight: "900", color: "#121214", flex: 1 },
   cardMeta: { fontSize: 12, fontWeight: "800", color: "#7A7A83" },
   cardNotes: { marginTop: 8, fontSize: 13, fontWeight: "700", color: "#5F5F66", lineHeight: 18 },
-  cardSection: { marginTop: 2 },
-  cardSectionTitle: { fontSize: 12, fontWeight: "900", color: "#5F5F66", marginBottom: 6 },
-  cardEmpty: { marginTop: 4, fontSize: 14, fontWeight: "700", color: "#7A7A83" },
+  cardEmpty: { marginTop: 6, fontSize: 14, fontWeight: "700", color: "#7A7A83" },
 
-  runsCard: { marginTop: 10, borderRadius: 18, backgroundColor: "#F7F7F9", padding: 12 },
-  cardEmptyCompact: { marginTop: 2, fontSize: 14, fontWeight: "800", color: "#7A7A83" },
-  sectionDividerThin: { height: 1, backgroundColor: "#E2E2E8", marginVertical: 10 },
-
-  smallPrimaryBtn: { borderRadius: 14, backgroundColor: "#121214", paddingVertical: 6, paddingHorizontal: 14, alignItems: "center", justifyContent: "center" },
+  smallPrimaryBtn: { borderRadius: 14, backgroundColor: "#121214", paddingVertical: 10, paddingHorizontal: 14, alignItems: "center", justifyContent: "center" },
   smallPrimaryBtnText: { color: "#FFFFFF", fontSize: 14, fontWeight: "900" },
+
+  smallGhostBtn: { borderRadius: 14, backgroundColor: "#F4F4F6", paddingVertical: 10, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },
+  smallGhostBtnText: { color: "#111827", fontSize: 14, fontWeight: "900" },
+  disabledGhostBtn: { opacity: 0.55 },
+  disabledGhostBtnText: { color: "#9CA3AF" },
 
   modalSafe: { flex: 1, backgroundColor: "#FFFFFF" },
   modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8, gap: 10 },
@@ -2012,6 +1831,12 @@ const styles = StyleSheet.create({
   segmentItemSelected: { backgroundColor: "#121214" },
   segmentText: { fontSize: 14, fontWeight: "900", color: "#5F5F66" },
   segmentTextSelected: { color: "#FFFFFF" },
+
+  categoryRow: { flexDirection: "row", gap: 10 },
+  categoryPill: { flex: 1, borderRadius: 14, backgroundColor: "#F4F4F6", paddingVertical: 12, alignItems: "center", justifyContent: "center" },
+  categoryPillSelected: { backgroundColor: "#121214" },
+  categoryPillText: { fontSize: 14, fontWeight: "900", color: "#5F5F66" },
+  categoryPillTextSelected: { color: "#FFFFFF" },
 
   errorText: { marginTop: 10, color: "#B91C1C", fontWeight: "900" },
 
