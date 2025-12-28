@@ -1,5 +1,5 @@
-import React from "react";
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import React, { useMemo } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
@@ -16,30 +16,21 @@ type RowProps = {
 
 function SettingsRow({ title, subtitle, to, badge }: RowProps) {
   const navigation = useNavigation<Nav>();
+
   return (
-    <View style={styles.rowOuter}>
-      <View
-        style={styles.row}
-        // Use a plain onPress pattern via navigation header buttons in sub-screens.
-        // Row itself is pressable via the wrapper below.
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rowTitle}>{title}</Text>
-          {!!subtitle && <Text style={styles.rowSub}>{subtitle}</Text>}
-        </View>
-        {!!badge && <Text style={styles.badge}>{badge}</Text>}
-        <Text style={styles.chev}>›</Text>
+    <Pressable
+      accessibilityRole="button"
+      onPress={() => navigation.navigate(to as any)}
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={styles.rowTitle}>{title}</Text>
+        {!!subtitle && <Text style={styles.rowSub}>{subtitle}</Text>}
       </View>
 
-      {/* Transparent pressable overlay */}
-      <Text
-        accessibilityRole="button"
-        onPress={() => navigation.navigate(to as any)}
-        style={styles.rowPressOverlay}
-      >
-        {" "}
-      </Text>
-    </View>
+      {!!badge && <Text style={styles.badge}>{badge}</Text>}
+      <Text style={styles.chev}>›</Text>
+    </Pressable>
   );
 }
 
@@ -53,6 +44,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export default function SettingsScreen() {
+  const footer = useMemo(() => "Phase 1 scaffold — more settings will appear as features land.", []);
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.pageTitle}>Settings</Text>
@@ -87,7 +80,7 @@ export default function SettingsScreen() {
         <SettingsRow title="About" to="About" />
       </Section>
 
-      <Text style={styles.footer}>Phase 1 scaffold — more settings will appear as features land.</Text>
+      <Text style={styles.footer}>{footer}</Text>
     </ScrollView>
   );
 }
@@ -122,9 +115,6 @@ const styles = StyleSheet.create({
     borderColor: "#E6E8EE",
     overflow: "hidden",
   },
-  rowOuter: {
-    position: "relative",
-  },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -134,13 +124,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#EEF0F5",
   },
-  rowPressOverlay: {
-    position: "absolute",
-    left: 0,
-    top: 0,
-    right: 0,
-    bottom: 0,
-    opacity: 0,
+  rowPressed: {
+    opacity: 0.6,
   },
   rowTitle: {
     fontSize: 16,

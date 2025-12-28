@@ -17,7 +17,6 @@ import CalendarSettingsScreen from "../screens/settings/CalendarSettingsScreen";
 export type SettingsStackParamList = {
   SettingsRoot: undefined;
   CalendarSettings: undefined;
-
   FamilyMembers: undefined;
   Profile: undefined;
   Notifications: undefined;
@@ -47,7 +46,7 @@ export default function SettingsStack() {
       <Stack.Screen
         name="CalendarSettings"
         component={CalendarSettingsScreen}
-        options={{ title: "Calendar" }}
+        options={{ title: "Calendar settings" }}
       />
 
       <Stack.Screen name="FamilyMembers" component={FamilyMembersScreen} options={{ title: "Family & Members" }} />

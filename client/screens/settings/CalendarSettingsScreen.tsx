@@ -11,134 +11,198 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const STORAGE_KEY_RUNS_PEOPLE = "fs.runs.people.v1";
+const STORAGE_KEY_SCHOOL_YEAR_LABEL_MODE = "fs.schoolYearLabelMode.v1";
 
-function normalizeName(s: string) {
-  return s.trim().replace(/\s+/g, " ");
+type YearLabelMode = "split" | "single"; // split: 2025/2026, single: 2025
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.card}>{children}</View>
+    </View>
+  );
 }
 
 export default function CalendarSettingsScreen() {
-  const [loaded, setLoaded] = useState(false);
   const [people, setPeople] = useState<string[]>([]);
-  const [draft, setDraft] = useState("");
+  const [peopleLoaded, setPeopleLoaded] = useState(false);
 
-  const sorted = useMemo(() => {
-    const uniq = Array.from(new Set(people.map((p) => normalizeName(p)).filter(Boolean)));
-    uniq.sort((a, b) => a.localeCompare(b));
-    return uniq;
-  }, [people]);
+  const [newName, setNewName] = useState("");
+  const [mode, setMode] = useState<YearLabelMode>("split");
+  const [modeLoaded, setModeLoaded] = useState(false);
 
   useEffect(() => {
     let mounted = true;
-    (async () => {
+
+    async function load() {
       try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY_RUNS_PEOPLE);
-        if (!mounted) return;
-        if (raw) {
-          const parsed = JSON.parse(raw);
+        const rawPeople = await AsyncStorage.getItem(STORAGE_KEY_RUNS_PEOPLE);
+        if (mounted && rawPeople) {
+          const parsed = JSON.parse(rawPeople);
           if (Array.isArray(parsed)) {
             const cleaned = (parsed as any[])
               .filter((x) => typeof x === "string")
-              .map((x) => normalizeName(String(x)))
-              .filter((x) => !!x && x.toLowerCase() !== "you")
-              .slice(0, 50);
+              .map((s) => String(s).trim())
+              .filter((s) => !!s && s.toLowerCase() !== "you")
+              .slice(0, 30);
             setPeople(cleaned);
           }
         }
       } catch {
+        // ignore
       } finally {
-        if (mounted) setLoaded(true);
+        if (mounted) setPeopleLoaded(true);
       }
-    })();
+
+      try {
+        const rawMode = await AsyncStorage.getItem(STORAGE_KEY_SCHOOL_YEAR_LABEL_MODE);
+        if (mounted && rawMode) {
+          const v = String(rawMode).trim() as YearLabelMode;
+          if (v === "split" || v === "single") setMode(v);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (mounted) setModeLoaded(true);
+      }
+    }
+
+    load();
     return () => {
       mounted = false;
     };
   }, []);
 
   useEffect(() => {
-    if (!loaded) return;
-    AsyncStorage.setItem(STORAGE_KEY_RUNS_PEOPLE, JSON.stringify(sorted)).catch(() => {
-      Alert.alert("Couldn’t save changes", "Try again.");
+    if (!peopleLoaded) return;
+    AsyncStorage.setItem(STORAGE_KEY_RUNS_PEOPLE, JSON.stringify(people)).catch(() => {
+      Alert.alert("Couldn’t save", "Try again.");
     });
-  }, [sorted, loaded]);
+  }, [people, peopleLoaded]);
+
+  useEffect(() => {
+    if (!modeLoaded) return;
+    AsyncStorage.setItem(STORAGE_KEY_SCHOOL_YEAR_LABEL_MODE, mode).catch(() => {
+      Alert.alert("Couldn’t save", "Try again.");
+    });
+  }, [mode, modeLoaded]);
+
+  const sortedPeople = useMemo(
+    () => people.slice().sort((a, b) => a.localeCompare(b)),
+    [people]
+  );
 
   function addPerson() {
-    const name = normalizeName(draft);
+    const name = newName.trim();
     if (!name) return;
-    if (name.toLowerCase() === "you") return;
-    setPeople((prev) => [name, ...prev]);
-    setDraft("");
+    if (name.toLowerCase() === "you") {
+      Alert.alert("Not needed", "“You” is already available by default.");
+      return;
+    }
+    setPeople((prev) => {
+      if (prev.some((p) => p.toLowerCase() === name.toLowerCase())) return prev;
+      return [...prev, name].slice(0, 30);
+    });
+    setNewName("");
   }
 
-  function confirmDelete(name: string) {
-    Alert.alert("Remove person?", `"${name}" will be removed from the picker.`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => setPeople((prev) => prev.filter((p) => normalizeName(p) !== name)),
-      },
-    ]);
+  function removePerson(name: string) {
+    setPeople((prev) => prev.filter((p) => p !== name));
   }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.pageTitle}>Calendar settings</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>School runs people</Text>
-        <Text style={styles.cardSub}>
-          These appear in the “Who’s doing the run?” picker. “You” is always available.
-        </Text>
+      <Section title="School runs">
+        <View style={styles.block}>
+          <Text style={styles.label}>People available in “Who’s doing the run?”</Text>
 
-        <View style={styles.addRow}>
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Add person (e.g. Mark)"
-            placeholderTextColor="#9CA3AF"
-            style={styles.input}
-            autoCapitalize="words"
-            returnKeyType="done"
-            onSubmitEditing={addPerson}
-          />
-          <Pressable
-            onPress={addPerson}
-            disabled={!draft.trim()}
-            style={({ pressed }) => [
-              styles.addBtn,
-              !draft.trim() && styles.addBtnDisabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={[styles.addBtnText, !draft.trim() && styles.addBtnTextDisabled]}>Add</Text>
-          </Pressable>
+          {sortedPeople.length === 0 ? (
+            <Text style={styles.muted}>No saved people yet.</Text>
+          ) : (
+            sortedPeople.map((p) => (
+              <View key={p} style={styles.personRow}>
+                <Text style={styles.personName}>{p}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => removePerson(p)}
+                  style={({ pressed }) => [styles.removeBtn, pressed && styles.pressed]}
+                >
+                  <Text style={styles.removeBtnText}>Remove</Text>
+                </Pressable>
+              </View>
+            ))
+          )}
+
+          <View style={styles.addRow}>
+            <TextInput
+              value={newName}
+              onChangeText={setNewName}
+              placeholder="Add a person…"
+              placeholderTextColor="#9CA3AF"
+              style={styles.textInput}
+              returnKeyType="done"
+              onSubmitEditing={addPerson}
+            />
+            <Pressable
+              accessibilityRole="button"
+              onPress={addPerson}
+              style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]}
+            >
+              <Text style={styles.primaryBtnText}>Add</Text>
+            </Pressable>
+          </View>
+
+          <Text style={styles.note}>
+            Tip: “You” is always available and doesn’t need to be added here.
+          </Text>
         </View>
+      </Section>
 
-        <View style={styles.divider} />
+      <Section title="School holidays">
+        <View style={styles.block}>
+          <Text style={styles.label}>Academic year label between arrows</Text>
 
-        {sorted.length === 0 ? (
-          <Text style={styles.empty}>No saved people yet.</Text>
-        ) : (
-          sorted.map((p) => (
-            <View key={p} style={styles.personRow}>
-              <Text style={styles.personName}>{p}</Text>
-              <Pressable
-                onPress={() => confirmDelete(p)}
-                style={({ pressed }) => [styles.removeBtn, pressed && styles.pressed]}
-              >
-                <Text style={styles.removeBtnText}>Remove</Text>
-              </Pressable>
-            </View>
-          ))
-        )}
-      </View>
+          <View style={styles.segment}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setMode("split")}
+              style={({ pressed }) => [
+                styles.segmentItem,
+                mode === "split" && styles.segmentItemSelected,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.segmentText, mode === "split" && styles.segmentTextSelected]}>
+                2025/2026
+              </Text>
+            </Pressable>
 
-      <View style={styles.noteCard}>
-        <Text style={styles.noteTitle}>Academic year display</Text>
-        <Text style={styles.noteText}>
-          Phase 1: this stays as “YYYY/YYYY” in School holidays. We can add a toggle later.
-        </Text>
-      </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setMode("single")}
+              style={({ pressed }) => [
+                styles.segmentItem,
+                mode === "single" && styles.segmentItemSelected,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.segmentText, mode === "single" && styles.segmentTextSelected]}>
+                2025
+              </Text>
+            </Pressable>
+          </View>
+
+          <Text style={styles.note}>
+            Phase 1: this setting is stored locally. We’ll wire it into the School holidays header
+            when we do the next Calendar polish pass.
+          </Text>
+        </View>
+      </Section>
+
+      <Text style={styles.footer}>Phase 1 scaffold — more calendar settings will appear later.</Text>
     </ScrollView>
   );
 }
@@ -150,81 +214,49 @@ const styles = StyleSheet.create({
     backgroundColor: "#F7F8FB",
   },
   pageTitle: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: "800",
     color: "#111827",
     marginBottom: 12,
+  },
+  section: {
+    marginTop: 14,
+  },
+  sectionTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#6B7280",
+    marginBottom: 8,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
   card: {
     backgroundColor: "#FFFFFF",
     borderRadius: 18,
     borderWidth: 1,
     borderColor: "#E6E8EE",
+    overflow: "hidden",
+  },
+  block: {
     padding: 14,
   },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: "900",
+  label: {
+    fontSize: 14,
+    fontWeight: "800",
     color: "#111827",
+    marginBottom: 10,
   },
-  cardSub: {
-    marginTop: 6,
+  muted: {
     fontSize: 13,
     fontWeight: "600",
     color: "#6B7280",
   },
-  addRow: {
-    marginTop: 12,
-    flexDirection: "row",
-    gap: 10,
-    alignItems: "center",
-  },
-  input: {
-    flex: 1,
-    height: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#E6E8EE",
-    paddingHorizontal: 12,
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#111827",
-    backgroundColor: "#FFFFFF",
-  },
-  addBtn: {
-    height: 44,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    backgroundColor: "#111827",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  addBtnDisabled: {
-    backgroundColor: "#E5E7EB",
-  },
-  addBtnText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  addBtnTextDisabled: {
-    color: "#9CA3AF",
-  },
-  divider: {
-    marginTop: 12,
-    height: 1,
-    backgroundColor: "#EEF0F5",
-  },
-  empty: {
-    marginTop: 12,
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#6B7280",
-  },
   personRow: {
-    marginTop: 12,
     flexDirection: "row",
     alignItems: "center",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF0F5",
   },
   personName: {
     flex: 1,
@@ -235,32 +267,80 @@ const styles = StyleSheet.create({
   removeBtn: {
     paddingVertical: 8,
     paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: "#F3F4F6",
   },
   removeBtnText: {
-    fontSize: 13,
-    fontWeight: "900",
-    color: "#B91C1C",
-  },
-  noteCard: {
-    marginTop: 14,
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#E6E8EE",
-    padding: 14,
-  },
-  noteTitle: {
-    fontSize: 15,
-    fontWeight: "900",
+    fontSize: 12,
+    fontWeight: "800",
     color: "#111827",
   },
-  noteText: {
-    marginTop: 6,
-    fontSize: 13,
+  addRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 12,
+    alignItems: "center",
+  },
+  textInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#E6E8EE",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#111827",
+    backgroundColor: "#FFFFFF",
+  },
+  primaryBtn: {
+    backgroundColor: "#111827",
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+  },
+  primaryBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  note: {
+    marginTop: 10,
+    fontSize: 12,
     fontWeight: "600",
     color: "#6B7280",
   },
+  segment: {
+    flexDirection: "row",
+    backgroundColor: "#F3F4F6",
+    borderRadius: 999,
+    padding: 4,
+    gap: 4,
+  },
+  segmentItem: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+    borderRadius: 999,
+  },
+  segmentItemSelected: {
+    backgroundColor: "#111827",
+  },
+  segmentText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#6B7280",
+  },
+  segmentTextSelected: {
+    color: "#FFFFFF",
+  },
   pressed: {
-    opacity: 0.7,
+    opacity: 0.6,
+  },
+  footer: {
+    marginTop: 18,
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#6B7280",
   },
 });
