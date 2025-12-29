@@ -1,26 +1,31 @@
 import React, { useMemo, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, Platform } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from "react-native";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
 import * as ImagePicker from "expo-image-picker";
 
 import type { RootStackParamList } from "../navigation/RootStack";
 import Avatar from "../components/Avatar";
+import CircularCropperModal from "../components/CircularCropperModal";
 import { useIdentityImage } from "../data/identityImagesStore";
 
-/**
- * Phase 2.1 — Your Details polish (2-field names)
- * - Photo is optional and chosen by tapping the circle.
- * - Two fields:
- *    1) Your name (private / for records)
- *    2) Display name (used across the app)
- * - Avatar uses displayName only so placeholder shows 📷 until typing or photo.
- */
 type Props = NativeStackScreenProps<RootStackParamList, "YourDetails">;
 
+/**
+ * Phase 2.1 — YourDetailsScreen
+ * - Two name fields: Legal name + Name shown to family (short label)
+ * - Photo selection uses our in-app CircularCropperModal (NOT iOS square editor)
+ *   so we can show the circular guide overlay consistently.
+ */
 export default function YourDetailsScreen({ navigation }: Props) {
   const [legalName, setLegalName] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const [familyName, setFamilyName] = useState("");
   const image = useIdentityImage("profile:self");
+
+  // Cropper modal state
+  const [pendingUri, setPendingUri] = useState<string | null>(null);
+  const [cropVisible, setCropVisible] = useState(false);
+
+  const displayName = familyName.trim() || legalName.trim();
 
   const canContinue = useMemo(() => displayName.trim().length >= 2, [displayName]);
 
@@ -32,19 +37,35 @@ export default function YourDetailsScreen({ navigation }: Props) {
         return;
       }
 
+      // IMPORTANT: do NOT use iOS built-in editor (square crop UI). We want our own cropper.
       const res = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
+        allowsEditing: false,
         quality: 0.9,
       });
 
       if (res.canceled) return;
       const uri = res.assets?.[0]?.uri;
       if (!uri) return;
-      await image.set(uri);
+
+      setPendingUri(uri);
+      setCropVisible(true);
     } catch {
       Alert.alert("Couldn’t add photo", "Please try again.");
+    }
+  };
+
+  const onCropCancel = () => {
+    setCropVisible(false);
+    setPendingUri(null);
+  };
+
+  const onCropDone = async (resultUri: string) => {
+    try {
+      await image.set(resultUri);
+    } finally {
+      setCropVisible(false);
+      setPendingUri(null);
     }
   };
 
@@ -56,48 +77,56 @@ export default function YourDetailsScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Your details</Text>
-      <Text style={styles.subtitle}>Add your names and an optional photo. You can edit this later in Settings.</Text>
+      <Text style={styles.subtitle}>Add your name and an optional photo. You can edit this later in Settings.</Text>
 
-      <View style={styles.photoBlock}>
-        <Text style={styles.photoHint}>Tap the circle to choose a photo (optional)</Text>
-
-        <TouchableOpacity style={styles.avatarTap} activeOpacity={0.85} onPress={onPickPhoto}>
+      <View style={styles.photoRow}>
+        <TouchableOpacity onPress={onPickPhoto} activeOpacity={0.85} style={styles.photoTap}>
           <Avatar name={displayName} uri={image.uri} size={94} />
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>+</Text>
-          </View>
         </TouchableOpacity>
+
+        <View style={{ flex: 1 }}>
+          <Text style={styles.photoHelper}>Tap the circle to choose a photo</Text>
+          <Text style={styles.photoHelperSmall}>{image.uri ? "Tap again to change it" : "Optional"}</Text>
+        </View>
       </View>
 
-      <Text style={styles.label}>Your name</Text>
-      <Text style={styles.helper}>For your own records. (Not shown to the family.)</Text>
+      <Text style={styles.label}>Legal name</Text>
       <TextInput
         value={legalName}
         onChangeText={setLegalName}
-        placeholder="e.g. Jordan Taylor"
+        placeholder="e.g. Mark Robson"
         autoCapitalize="words"
-        textContentType={Platform.OS === "ios" ? "name" : "none"}
         style={styles.input}
-        returnKeyType="next"
       />
 
-      <Text style={styles.label}>Display name</Text>
-      <Text style={styles.helper}>This is how you’ll appear across FamilySync.</Text>
+      <Text style={styles.label}>Name shown to family</Text>
       <TextInput
-        value={displayName}
-        onChangeText={setDisplayName}
-        placeholder="e.g. Jordan, Mum, Dad"
+        value={familyName}
+        onChangeText={setFamilyName}
+        placeholder="e.g. Mark"
         autoCapitalize="words"
-        textContentType={Platform.OS === "ios" ? "nickname" : "none"}
         style={styles.input}
-        returnKeyType="done"
       />
 
-      <TouchableOpacity style={[styles.cta, !canContinue && { opacity: 0.45 }]} onPress={onContinue} disabled={!canContinue}>
+      <TouchableOpacity
+        style={[styles.cta, !canContinue && { opacity: 0.45 }]}
+        onPress={onContinue}
+        disabled={!canContinue}
+      >
         <Text style={styles.ctaText}>Continue</Text>
       </TouchableOpacity>
 
-      <Text style={styles.small}>Photos are stored locally on this device in Phase 2.1.</Text>
+      <Text style={styles.small}>
+        Photos are stored locally on this device in Phase 2.1. Family syncing will be enabled in a later phase.
+      </Text>
+
+      <CircularCropperModal
+        visible={cropVisible}
+        uri={pendingUri}
+        title="Position your photo"
+        onCancel={onCropCancel}
+        onDone={onCropDone}
+      />
     </View>
   );
 }
@@ -107,26 +136,12 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: "900", color: "#111827" },
   subtitle: { marginTop: 8, fontSize: 15, lineHeight: 20, color: "#4B5563" },
 
-  photoBlock: { marginTop: 16, alignItems: "center" },
-  photoHint: { fontSize: 13, fontWeight: "800", color: "#6B7280", textAlign: "center" },
-  avatarTap: { marginTop: 10, alignSelf: "center" },
-  badge: {
-    position: "absolute",
-    right: -2,
-    bottom: -2,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: "#111827",
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#FFFFFF",
-  },
-  badgeText: { color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: -1 },
+  photoRow: { marginTop: 16, flexDirection: "row", alignItems: "center", gap: 14 },
+  photoTap: { borderRadius: 9999 },
+  photoHelper: { fontSize: 15, fontWeight: "800", color: "#111827" },
+  photoHelperSmall: { marginTop: 2, fontSize: 13, color: "#6B7280" },
 
   label: { marginTop: 18, fontSize: 13, fontWeight: "800", color: "#6B7280" },
-  helper: { marginTop: 6, fontSize: 13, lineHeight: 17, color: "#6B7280", textAlign: "left" },
   input: {
     marginTop: 8,
     borderWidth: StyleSheet.hairlineWidth,
@@ -138,8 +153,14 @@ const styles = StyleSheet.create({
     color: "#111827",
   },
 
-  cta: { marginTop: 18, borderRadius: 14, backgroundColor: "#111827", paddingVertical: 14, alignItems: "center" },
+  cta: {
+    marginTop: 18,
+    borderRadius: 14,
+    backgroundColor: "#111827",
+    paddingVertical: 14,
+    alignItems: "center",
+  },
   ctaText: { color: "#FFFFFF", fontWeight: "900", fontSize: 16 },
 
-  small: { marginTop: 14, fontSize: 12, lineHeight: 16, color: "#6B7280", textAlign: "center" },
+  small: { marginTop: 14, fontSize: 12, lineHeight: 16, color: "#6B7280" },
 });
