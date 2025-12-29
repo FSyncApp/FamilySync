@@ -34,12 +34,12 @@ const stylesVars = {
 
 function isLikelyEmail(value: string) {
   const v = value.trim();
-  // intentionally light validation for Phase 1
+  // intentionally light validation for Phase 2/3
   return v.includes("@") && v.includes(".") && v.length >= 5;
 }
 
 export default function InviteAdultsScreen({ navigation }: Props) {
-  // Phase 1: invite placeholders only (no actual sending yet)
+  // Phase 2–3: capture invite intent only (no email sending yet)
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [invites, setInvites] = useState<Invite[]>([]);
@@ -83,7 +83,7 @@ export default function InviteAdultsScreen({ navigation }: Props) {
   };
 
   const goToMainHome = () => {
-    // Deterministic: always land on Main -> Home tab (no restoring Messages etc.)
+    // Deterministic: always land on Main -> Home tab
     navigation.reset({
       index: 0,
       routes: [{ name: "Main", params: { screen: "Home" } as any }],
@@ -94,16 +94,9 @@ export default function InviteAdultsScreen({ navigation }: Props) {
     goToMainHome();
   };
 
-  const onSkip = () => {
-    goToMainHome();
-  };
-
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView
-        style={styles.safe}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      <KeyboardAvoidingView style={styles.safe} behavior={Platform.OS === "ios" ? "padding" : undefined}>
         <ScrollView
           style={styles.page}
           contentContainerStyle={styles.pageContent}
@@ -111,9 +104,7 @@ export default function InviteAdultsScreen({ navigation }: Props) {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.title}>Invite your family</Text>
-          <Text style={styles.subtitle}>
-            Add one invite at a time. You can invite more people later.
-          </Text>
+          <Text style={styles.subtitle}>Add one invite at a time. You can invite more people later.</Text>
 
           <View style={styles.card}>
             <Text style={styles.label}>Their name</Text>
@@ -180,24 +171,10 @@ export default function InviteAdultsScreen({ navigation }: Props) {
                   </TouchableOpacity>
                 </View>
               ))}
-
-              <Text style={styles.note}>
-                Phase 1: invites are stored locally for now. Email sending comes later.
-              </Text>
             </View>
           ) : null}
 
           <View style={styles.actions}>
-            <TouchableOpacity
-              accessibilityRole="button"
-              accessibilityLabel="Skip inviting"
-              onPress={onSkip}
-              activeOpacity={0.85}
-              style={styles.secondaryButton}
-            >
-              <Text style={styles.secondaryButtonText}>Skip</Text>
-            </TouchableOpacity>
-
             <TouchableOpacity
               accessibilityRole="button"
               accessibilityLabel="Continue to Home"
@@ -207,6 +184,8 @@ export default function InviteAdultsScreen({ navigation }: Props) {
             >
               <Text style={styles.primaryButtonWideText}>Continue</Text>
             </TouchableOpacity>
+
+            <Text style={styles.helper}>Invites will be emailed once family sharing is enabled.</Text>
           </View>
 
           <View style={{ height: 24 }} />
@@ -340,38 +319,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  note: {
-    fontSize: 12.5,
-    lineHeight: 16,
-    fontWeight: "600",
-    color: stylesVars.inkMuted,
-    marginTop: 6,
-  },
-
   actions: {
     marginTop: 18,
-    flexDirection: "row",
-    gap: 12,
-  },
-  secondaryButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: stylesVars.card,
-    borderWidth: 1,
-    borderColor: stylesVars.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  secondaryButtonText: {
-    fontSize: 15,
-    lineHeight: 18,
-    fontWeight: "700",
-    color: stylesVars.ink,
   },
 
   primaryButtonWide: {
-    flex: 1,
+    width: "100%",
     height: 48,
     borderRadius: 14,
     backgroundColor: stylesVars.ink,
@@ -383,5 +336,14 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 18,
     fontWeight: "800",
+  },
+
+  helper: {
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+    color: stylesVars.inkMuted,
+    textAlign: "center",
   },
 });
