@@ -25,22 +25,17 @@ function keyForChild(childId: string) {
   return `child:${childId}`;
 }
 
-const NAME_PLACEHOLDERS = ["Lucy", "Sam", "Noah", "Ava", "Leo", "Mia", "Ella", "Jack", "Sofia", "Max"];
-
-function namePlaceholderForIndex(index: number) {
-  const name = NAME_PLACEHOLDERS[index % NAME_PLACEHOLDERS.length];
-  return `e.g. ${name}`;
-}
+const NAME_PLACEHOLDERS = ["Lucy", "Sam", "Noah", "Olivia", "Jack", "Ava", "Mia", "Leo", "Ella", "Theo"];
 
 type ChildCardProps = {
   child: ChildDraft;
   index: number;
-  canRemove: boolean;
-  onRemove: (id: string) => void;
+  namePlaceholder: string;
   onUpdate: (id: string, patch: Partial<ChildDraft>) => void;
+  onRemove: (id: string) => void;
 };
 
-function ChildCard({ child, index, canRemove, onRemove, onUpdate }: ChildCardProps) {
+function ChildCard({ child, index, namePlaceholder, onUpdate, onRemove }: ChildCardProps) {
   // ✅ Hooks live inside a stable component boundary, not inside the parent map render.
   // This prevents "Rendered more hooks than during the previous render" when adding/removing children.
   const image = useIdentityImage(keyForChild(child.id));
@@ -88,12 +83,10 @@ function ChildCard({ child, index, canRemove, onRemove, onUpdate }: ChildCardPro
     }
   };
 
-  const handleRemove = async () => {
+  const handleRemoveChild = async () => {
     try {
-      // Clear stored image for this child so it doesn't linger in AsyncStorage.
-      await image.set(null);
-    } catch {
-      // Non-fatal; still remove the card.
+      // Clear any saved photo first (Phase 2/3: identity images are stored locally).
+      await image.setUri(null);
     } finally {
       onRemove(child.id);
     }
@@ -101,35 +94,35 @@ function ChildCard({ child, index, canRemove, onRemove, onUpdate }: ChildCardPro
 
   return (
     <View style={styles.childCard}>
-      <View style={styles.childHeaderRow}>
+      <View style={styles.cardHeader}>
         <Text style={styles.childTitle}>Child {index + 1}</Text>
-        {canRemove ? (
-          <TouchableOpacity onPress={handleRemove} activeOpacity={0.85} hitSlop={8}>
+
+        {index > 0 ? (
+          <TouchableOpacity onPress={handleRemoveChild} hitSlop={8} activeOpacity={0.85}>
             <Text style={styles.removeText}>Remove</Text>
           </TouchableOpacity>
         ) : null}
       </View>
 
-      <View style={styles.photoRow}>
-        <TouchableOpacity onPress={openCropper} activeOpacity={0.85} style={styles.photoTap}>
-          <Avatar name={child.name} uri={image.uri} size={58} />
+      {/* Option A: avatar left of name input */}
+      <View style={styles.profileRow}>
+        <TouchableOpacity onPress={openCropper} activeOpacity={0.85} style={styles.avatarTap}>
+          <Avatar name={child.name} uri={image.uri} size={56} />
         </TouchableOpacity>
 
         <View style={{ flex: 1 }}>
-          <Text style={styles.photoHelperSmall}>Add photo later</Text>
+          <Text style={styles.label}>Name</Text>
+          <TextInput
+            value={child.name}
+            onChangeText={(t) => onUpdate(child.id, { name: t })}
+            placeholder={`e.g. ${namePlaceholder}`}
+            autoCapitalize="words"
+            style={styles.input}
+          />
         </View>
       </View>
 
-      <Text style={styles.label}>Name</Text>
-      <TextInput
-        value={child.name}
-        onChangeText={(t) => onUpdate(child.id, { name: t })}
-        placeholder={namePlaceholderForIndex(index)}
-        autoCapitalize="words"
-        style={styles.input}
-      />
-
-      <Text style={styles.label}>Birthday</Text>
+      <Text style={[styles.label, { marginTop: 10 }]}>Birthday (optional)</Text>
       <TextInput
         value={child.birthday}
         onChangeText={(t) => onUpdate(child.id, { birthday: t })}
@@ -156,16 +149,18 @@ function ChildCard({ child, index, canRemove, onRemove, onUpdate }: ChildCardPro
  * - Resolve "Rendered more hooks than during the previous render" when adding children
  *   by moving per-child hooks/state into a ChildCard component boundary.
  *
- * Phase 3.2 polish:
- * - Children step is optional (Continue always enabled)
- * - Default one child card visible
- * - Rotating example placeholders (Lucy, Sam, Noah…)
- * - "Add photo later" helper text
- * - Remove link available for child #2+
+ * Phase 3.2.1 (UI tidy):
+ * - "Add children to your family" title
+ * - Remove redundant subtitle; keep only the small reassurance below Continue
+ * - Avatar sits left of Name input (compact contact-row layout)
+ * - Remove "add photo later" text (affordance is clear)
+ * - Rotating name placeholders as new children are added
+ * - Remove child cards (child 2+) clears any stored child photo
  */
 export default function AddChildrenScreen({ navigation }: Props) {
   const [children, setChildren] = useState<ChildDraft[]>([{ id: makeId(), name: "", birthday: "" }]);
 
+  // Optional step (per spec): user can continue even with no children.
   const canContinue = useMemo(() => true, []);
 
   const onAddChild = () => {
@@ -187,20 +182,22 @@ export default function AddChildrenScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Children</Text>
-      <Text style={styles.subtitle}>Add your children&apos;s details. You can skip this and add them later in Settings.</Text>
+      <Text style={styles.title}>Add children to your family</Text>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 18 }}>
-        {children.map((child, index) => (
-          <ChildCard
-            key={child.id}
-            child={child}
-            index={index}
-            canRemove={index >= 1}
-            onRemove={onRemoveChild}
-            onUpdate={onUpdate}
-          />
-        ))}
+        {children.map((child, index) => {
+          const namePlaceholder = NAME_PLACEHOLDERS[index % NAME_PLACEHOLDERS.length];
+          return (
+            <ChildCard
+              key={child.id}
+              child={child}
+              index={index}
+              namePlaceholder={namePlaceholder}
+              onUpdate={onUpdate}
+              onRemove={onRemoveChild}
+            />
+          );
+        })}
 
         <TouchableOpacity onPress={onAddChild} style={styles.addAnother} activeOpacity={0.85}>
           <Text style={styles.addAnotherText}>+ Add another child</Text>
@@ -210,7 +207,7 @@ export default function AddChildrenScreen({ navigation }: Props) {
           <Text style={styles.ctaText}>Continue</Text>
         </TouchableOpacity>
 
-        <Text style={styles.small}>You can edit children and birthdays later in Settings.</Text>
+        <Text style={styles.small}>You can add or edit children later in Settings.</Text>
       </ScrollView>
     </View>
   );
@@ -219,7 +216,6 @@ export default function AddChildrenScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, paddingTop: 24, backgroundColor: "#FFFFFF" },
   title: { fontSize: 28, fontWeight: "900", color: "#111827" },
-  subtitle: { marginTop: 8, fontSize: 15, lineHeight: 20, color: "#4B5563" },
 
   childCard: {
     marginTop: 14,
@@ -228,39 +224,38 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
   },
-
-  childHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
+  cardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   childTitle: { fontSize: 15, fontWeight: "900", color: "#111827" },
-  removeText: { fontSize: 13, fontWeight: "800", color: "#B91C1C" },
+  removeText: { fontSize: 13, fontWeight: "800", color: "#DC2626" },
 
-  photoRow: { marginTop: 12, flexDirection: "row", alignItems: "center", gap: 12 },
-  photoTap: { borderRadius: 9999 },
+  profileRow: { marginTop: 12, flexDirection: "row", alignItems: "center", gap: 12 },
+  avatarTap: { borderRadius: 9999 },
 
-  // Keep this subtle — onboarding should not feel like a help manual.
-  photoHelperSmall: { fontSize: 12, color: "#6B7280" },
-
-  label: { marginTop: 14, fontSize: 13, fontWeight: "800", color: "#6B7280" },
+  label: { marginTop: 0, fontSize: 13, fontWeight: "800", color: "#111827" },
   input: {
-    marginTop: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#D1D5DB",
-    borderRadius: 14,
-    paddingVertical: 11,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    borderRadius: 12,
     paddingHorizontal: 12,
+    paddingVertical: 12,
     fontSize: 16,
     color: "#111827",
+    backgroundColor: "#FFFFFF",
   },
 
-  addAnother: { marginTop: 12, paddingVertical: 12, alignItems: "center" },
-  addAnotherText: { fontSize: 15, fontWeight: "800", color: "#111827" },
+  addAnother: {
+    marginTop: 16,
+    paddingVertical: 12,
+    alignItems: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  addAnotherText: { fontSize: 16, fontWeight: "800", color: "#111827" },
 
-  cta: { marginTop: 10, borderRadius: 14, backgroundColor: "#111827", paddingVertical: 14, alignItems: "center" },
+  cta: { marginTop: 14, backgroundColor: "#111827", borderRadius: 12, paddingVertical: 14, alignItems: "center" },
   ctaText: { color: "#FFFFFF", fontWeight: "900", fontSize: 16 },
 
-  small: { marginTop: 14, fontSize: 12, lineHeight: 16, color: "#6B7280" },
+  small: { marginTop: 10, fontSize: 12, color: "#6B7280", textAlign: "center" },
 });
