@@ -1,6 +1,7 @@
 import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 
 import WelcomeScreen from "./client/screens/WelcomeScreen";
 import CreateAccountScreen from "./client/screens/CreateAccountScreen";
@@ -49,48 +50,50 @@ export default function App() {
   const devSkipOnboarding = isDevSkipOnboardingEnabled();
 
   return (
-    <NavigationContainer>
-      <Stack.Navigator initialRouteName={devSkipOnboarding ? "Main" : "Welcome"}>
-        <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <NavigationContainer>
+        <Stack.Navigator initialRouteName={devSkipOnboarding ? "Main" : "Welcome"}>
+          <Stack.Screen name="Welcome" component={WelcomeScreen} options={{ headerShown: false }} />
 
-        <Stack.Screen
-          name="CreateAccount"
-          component={CreateAccountScreen}
-          options={{ title: "", headerBackTitleVisible: false }}
-        />
+          <Stack.Screen
+            name="CreateAccount"
+            component={CreateAccountScreen}
+            options={{ title: "", headerBackTitleVisible: false }}
+          />
 
-        <Stack.Screen
-          name="YourDetails"
-          component={YourDetailsScreen}
-          options={{ title: "", headerBackTitleVisible: false }}
-        />
+          <Stack.Screen
+            name="YourDetails"
+            component={YourDetailsScreen}
+            options={{ title: "", headerBackTitleVisible: false }}
+          />
 
-        <Stack.Screen
-          name="FamilyName"
-          component={FamilyNameScreen}
-          options={{ title: "", headerBackTitleVisible: false }}
-        />
+          <Stack.Screen
+            name="FamilyName"
+            component={FamilyNameScreen}
+            options={{ title: "", headerBackTitleVisible: false }}
+          />
 
-        <Stack.Screen
-          name="AddChildren"
-          component={AddChildrenScreen}
-          options={{ title: "", headerBackTitleVisible: false }}
-        />
+          <Stack.Screen
+            name="AddChildren"
+            component={AddChildrenScreen}
+            options={{ title: "", headerBackTitleVisible: false }}
+          />
 
-        <Stack.Screen
-          name="InviteAdults"
-          component={InviteAdultsScreen}
-          options={{ title: "", headerBackTitleVisible: false }}
-        />
+          <Stack.Screen
+            name="InviteAdults"
+            component={InviteAdultsScreen}
+            options={{ title: "", headerBackTitleVisible: false }}
+          />
 
-        {/* Post-onboarding: bottom tab shell */}
-        <Stack.Screen
-          name="Main"
-          component={MainTabs}
-          initialParams={devSkipOnboarding ? { initialTab: "Home" } : undefined}
-          options={{ headerShown: false }}
-        />
-      </Stack.Navigator>
-    </NavigationContainer>
+          {/* Post-onboarding: bottom tab shell */}
+          <Stack.Screen
+            name="Main"
+            component={MainTabs}
+            initialParams={devSkipOnboarding ? { initialTab: "Home" } : undefined}
+            options={{ headerShown: false }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </GestureHandlerRootView>
   );
 }
