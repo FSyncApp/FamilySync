@@ -441,7 +441,7 @@ const styles = StyleSheet.create({
 
   // Birthday line
   birthdayLineWrap: {
-    marginBottom: 16,
+    marginBottom: 12,
     paddingHorizontal: 2,
   },
   birthdayLine: {
@@ -453,14 +453,14 @@ const styles = StyleSheet.create({
 
   // Shortcuts
   shortcutsBlock: {
-    marginTop: 2,
+    marginTop: 0,
   },
   shortcutsLabel: {
     fontSize: 14,
     lineHeight: 18,
     fontWeight: "700",
     color: stylesVars.ink,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   shortcutsGrid: {
     flexDirection: "row",
@@ -471,18 +471,24 @@ const styles = StyleSheet.create({
     width: "31.5%",
     backgroundColor: stylesVars.card,
     borderWidth: 1,
-    borderColor: stylesVars.border,
+    borderColor: "#ECEFF5",
     borderRadius: 18,
-    paddingVertical: 14,
+    paddingVertical: 16,
     paddingHorizontal: 10,
-    marginBottom: 10,
+    marginBottom: 12,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
   },
   shortcutIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 12,
+    backgroundColor: "#F3F4F6",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
