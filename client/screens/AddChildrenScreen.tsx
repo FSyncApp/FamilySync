@@ -25,13 +25,22 @@ function keyForChild(childId: string) {
   return `child:${childId}`;
 }
 
+const NAME_PLACEHOLDERS = ["Lucy", "Sam", "Noah", "Ava", "Leo", "Mia", "Ella", "Jack", "Sofia", "Max"];
+
+function namePlaceholderForIndex(index: number) {
+  const name = NAME_PLACEHOLDERS[index % NAME_PLACEHOLDERS.length];
+  return `e.g. ${name}`;
+}
+
 type ChildCardProps = {
   child: ChildDraft;
   index: number;
+  canRemove: boolean;
+  onRemove: (id: string) => void;
   onUpdate: (id: string, patch: Partial<ChildDraft>) => void;
 };
 
-function ChildCard({ child, index, onUpdate }: ChildCardProps) {
+function ChildCard({ child, index, canRemove, onRemove, onUpdate }: ChildCardProps) {
   // ✅ Hooks live inside a stable component boundary, not inside the parent map render.
   // This prevents "Rendered more hooks than during the previous render" when adding/removing children.
   const image = useIdentityImage(keyForChild(child.id));
@@ -79,9 +88,27 @@ function ChildCard({ child, index, onUpdate }: ChildCardProps) {
     }
   };
 
+  const handleRemove = async () => {
+    try {
+      // Clear stored image for this child so it doesn't linger in AsyncStorage.
+      await image.set(null);
+    } catch {
+      // Non-fatal; still remove the card.
+    } finally {
+      onRemove(child.id);
+    }
+  };
+
   return (
     <View style={styles.childCard}>
-      <Text style={styles.childTitle}>Child {index + 1}</Text>
+      <View style={styles.childHeaderRow}>
+        <Text style={styles.childTitle}>Child {index + 1}</Text>
+        {canRemove ? (
+          <TouchableOpacity onPress={handleRemove} activeOpacity={0.85} hitSlop={8}>
+            <Text style={styles.removeText}>Remove</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
 
       <View style={styles.photoRow}>
         <TouchableOpacity onPress={openCropper} activeOpacity={0.85} style={styles.photoTap}>
@@ -89,8 +116,7 @@ function ChildCard({ child, index, onUpdate }: ChildCardProps) {
         </TouchableOpacity>
 
         <View style={{ flex: 1 }}>
-          <Text style={styles.photoHelper}>Tap to choose a photo</Text>
-          <Text style={styles.photoHelperSmall}>{image.uri ? "Tap again to change it" : "Optional"}</Text>
+          <Text style={styles.photoHelperSmall}>Add photo later</Text>
         </View>
       </View>
 
@@ -98,16 +124,16 @@ function ChildCard({ child, index, onUpdate }: ChildCardProps) {
       <TextInput
         value={child.name}
         onChangeText={(t) => onUpdate(child.id, { name: t })}
-        placeholder="e.g. Isla"
+        placeholder={namePlaceholderForIndex(index)}
         autoCapitalize="words"
         style={styles.input}
       />
 
-      <Text style={styles.label}>Birthday (optional)</Text>
+      <Text style={styles.label}>Birthday</Text>
       <TextInput
         value={child.birthday}
         onChangeText={(t) => onUpdate(child.id, { birthday: t })}
-        placeholder="DD/MM/YYYY"
+        placeholder="dd/mm/yyyy"
         autoCapitalize="none"
         keyboardType="numbers-and-punctuation"
         style={styles.input}
@@ -129,6 +155,13 @@ function ChildCard({ child, index, onUpdate }: ChildCardProps) {
  * Phase 3.1 fix:
  * - Resolve "Rendered more hooks than during the previous render" when adding children
  *   by moving per-child hooks/state into a ChildCard component boundary.
+ *
+ * Phase 3.2 polish:
+ * - Children step is optional (Continue always enabled)
+ * - Default one child card visible
+ * - Rotating example placeholders (Lucy, Sam, Noah…)
+ * - "Add photo later" helper text
+ * - Remove link available for child #2+
  */
 export default function AddChildrenScreen({ navigation }: Props) {
   const [children, setChildren] = useState<ChildDraft[]>([{ id: makeId(), name: "", birthday: "" }]);
@@ -137,6 +170,10 @@ export default function AddChildrenScreen({ navigation }: Props) {
 
   const onAddChild = () => {
     setChildren((prev) => [...prev, { id: makeId(), name: "", birthday: "" }]);
+  };
+
+  const onRemoveChild = (id: string) => {
+    setChildren((prev) => prev.filter((c) => c.id !== id));
   };
 
   const onUpdate = (id: string, patch: Partial<ChildDraft>) => {
@@ -151,11 +188,18 @@ export default function AddChildrenScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Children</Text>
-      <Text style={styles.subtitle}>Add your children&#39;s details. You can skip this and add them later in Settings.</Text>
+      <Text style={styles.subtitle}>Add your children&apos;s details. You can skip this and add them later in Settings.</Text>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 18 }}>
         {children.map((child, index) => (
-          <ChildCard key={child.id} child={child} index={index} onUpdate={onUpdate} />
+          <ChildCard
+            key={child.id}
+            child={child}
+            index={index}
+            canRemove={index >= 1}
+            onRemove={onRemoveChild}
+            onUpdate={onUpdate}
+          />
         ))}
 
         <TouchableOpacity onPress={onAddChild} style={styles.addAnother} activeOpacity={0.85}>
@@ -184,12 +228,21 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
   },
+
+  childHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
   childTitle: { fontSize: 15, fontWeight: "900", color: "#111827" },
+  removeText: { fontSize: 13, fontWeight: "800", color: "#B91C1C" },
 
   photoRow: { marginTop: 12, flexDirection: "row", alignItems: "center", gap: 12 },
   photoTap: { borderRadius: 9999 },
-  photoHelper: { fontSize: 14, fontWeight: "900", color: "#111827" },
-  photoHelperSmall: { marginTop: 2, fontSize: 12, color: "#6B7280" },
+
+  // Keep this subtle — onboarding should not feel like a help manual.
+  photoHelperSmall: { fontSize: 12, color: "#6B7280" },
 
   label: { marginTop: 14, fontSize: 13, fontWeight: "800", color: "#6B7280" },
   input: {
