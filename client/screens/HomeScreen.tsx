@@ -128,8 +128,8 @@ export default function HomeScreen() {
             showsVerticalScrollIndicator={true}
             nestedScrollEnabled={true}
           >
-            {TODAY_ITEMS.map((item) => (
-              <View key={item.id} style={styles.todayRow}>
+            {TODAY_ITEMS.map((item, index) => (
+              <View key={item.id} style={[styles.todayRow, index === 0 && styles.todayRowFirst]}>
                 <View style={styles.todayIconWrap}>
                   <Ionicons name={item.icon} size={18} color={stylesVars.inkMuted} />
                 </View>
@@ -242,14 +242,14 @@ const styles = StyleSheet.create({
 
   // Welcome & context
   welcomeBlock: {
-    marginBottom: 16,
+    marginBottom: 10,
   },
   welcomeTitle: {
     fontSize: 26,
     lineHeight: 32,
     fontWeight: "700",
     color: stylesVars.ink,
-    marginBottom: 6,
+    marginBottom: 4,
   },
   familySubtitle: {
     fontSize: 16,
@@ -287,6 +287,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: stylesVars.border,
+  },
+
+  // First row should feel “attached” to the card header (no divider above it)
+  todayRowFirst: {
+    borderTopWidth: 0,
   },
   todayIconWrap: {
     width: 26,
