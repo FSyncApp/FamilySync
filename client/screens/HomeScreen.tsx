@@ -192,6 +192,12 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {/* Subtle background "gradient" without extra deps (two layered tints) */}
+      <View pointerEvents="none" style={styles.bgLayer}>
+        <View style={styles.bgTopTint} />
+        <View style={styles.bgBottomTint} />
+      </View>
+
       <ScrollView style={styles.page} contentContainerStyle={styles.pageContent} showsVerticalScrollIndicator={false}>
         {/* Top App Chrome (scrolls with page, not sticky) */}
         <View style={styles.topChrome}>
@@ -313,9 +319,14 @@ export default function HomeScreen() {
 }
 
 const stylesVars = {
-  bg: "#F5F6F8",
-  card: "#FFFFFF",
-  border: "#E6E8EE",
+  // Base background tint (gradient layers add subtle depth on top)
+  bgBase: "#F5F6F8",
+
+  // Surfaces
+  card: "rgba(255,255,255,0.92)",
+
+  // Borders / ink
+  border: "rgba(230,232,238,0.75)",
   ink: "#111827",
   inkMuted: "#6B7280",
 };
@@ -323,7 +334,30 @@ const stylesVars = {
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: stylesVars.bg,
+    backgroundColor: stylesVars.bgBase,
+  },
+
+  // Background layer (fake gradient via two tints)
+  bgLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  bgTopTint: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: "62%",
+    backgroundColor: "#F7F8FC",
+    opacity: 0.9,
+  },
+  bgBottomTint: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: "55%",
+    backgroundColor: "#F2F4F8",
+    opacity: 0.9,
   },
 
   page: {
@@ -362,6 +396,13 @@ const styles = StyleSheet.create({
     borderColor: stylesVars.border,
     alignItems: "center",
     justifyContent: "center",
+    ...(Platform.OS === "ios"
+      ? {
+          shadowOpacity: 0.08,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 6 },
+        }
+      : { elevation: 2 }),
   },
 
   // Welcome & context
@@ -391,6 +432,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     marginBottom: 14,
+    ...(Platform.OS === "ios"
+      ? {
+          shadowOpacity: 0.06,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 10 },
+        }
+      : { elevation: 1 }),
   },
   todayHeader: {
     fontSize: 15,
@@ -441,7 +489,7 @@ const styles = StyleSheet.create({
 
   // Birthday line
   birthdayLineWrap: {
-    marginBottom: 12,
+    marginBottom: 16,
     paddingHorizontal: 2,
   },
   birthdayLine: {
@@ -453,14 +501,14 @@ const styles = StyleSheet.create({
 
   // Shortcuts
   shortcutsBlock: {
-    marginTop: 0,
+    marginTop: 2,
   },
   shortcutsLabel: {
     fontSize: 14,
     lineHeight: 18,
     fontWeight: "700",
     color: stylesVars.ink,
-    marginBottom: 8,
+    marginBottom: 10,
   },
   shortcutsGrid: {
     flexDirection: "row",
@@ -471,24 +519,25 @@ const styles = StyleSheet.create({
     width: "31.5%",
     backgroundColor: stylesVars.card,
     borderWidth: 1,
-    borderColor: "#ECEFF5",
+    borderColor: stylesVars.border,
     borderRadius: 18,
-    paddingVertical: 16,
+    paddingVertical: 14,
     paddingHorizontal: 10,
-    marginBottom: 12,
+    marginBottom: 10,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.06,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    ...(Platform.OS === "ios"
+      ? {
+          shadowOpacity: 0.06,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: 8 },
+        }
+      : { elevation: 1 }),
   },
   shortcutIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 12,
-    backgroundColor: "#F3F4F6",
+    width: 28,
+    height: 28,
+    borderRadius: 10,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
