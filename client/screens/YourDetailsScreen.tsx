@@ -74,7 +74,7 @@ export default function YourDetailsScreen({ navigation }: Props) {
       <TextInput
         value={legalName}
         onChangeText={setLegalName}
-        placeholder="e.g. Mark Robson"
+        placeholder="e.g. Jordan Taylor"
         autoCapitalize="words"
         textContentType={Platform.OS === "ios" ? "name" : "none"}
         style={styles.input}
