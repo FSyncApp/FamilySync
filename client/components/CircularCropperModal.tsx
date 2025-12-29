@@ -244,8 +244,14 @@ export default function CircularCropperModal({ visible, uri, title, onCancel, on
     const eff = baseScale * scaleRef.current;
     const cropSize = hole / eff;
 
-    const originX = imgSize.w / 2 - cropSize / 2 - panRef.current.x / eff;
-    const originY = imgSize.h / 2 - cropSize / 2 - panRef.current.y / eff;
+    // Export mapping fix:
+    // The crop circle is centered in the editor. Our pan is stored in editor space and eff = baseScale * scale.
+    // Map the editor center back into original image pixels, then crop a square of cropSize around it.
+    const imgCx = imgSize.w / 2 - panRef.current.x / eff;
+    const imgCy = imgSize.h / 2 - panRef.current.y / eff;
+
+    const originX = imgCx - cropSize / 2;
+    const originY = imgCy - cropSize / 2;
 
     const safe = {
       originX: Math.max(0, Math.min(imgSize.w - cropSize, originX)),
