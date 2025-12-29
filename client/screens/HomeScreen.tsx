@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { SafeAreaView, View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Alert } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
@@ -31,6 +31,12 @@ const TODAY_ITEMS: TodayItem[] = [
   { id: "5", icon: "people-outline", title: "Call Nana", subtitle: "Any time" },
 ];
 
+const TODAY_VISIBLE_ROWS = 4;
+const TODAY_AUTO_SCROLL_MS = 4500; // slow, calm
+const TODAY_RESUME_DELAY_MS = 1800; // after user interaction
+
+
+
 /**
  * Home v1.4.3 Shortcuts (LOCKED 2×3)
  * Phase 1 wiring:
@@ -61,11 +67,87 @@ export default function HomeScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<any>>();
 
   const birthdayTicker = useBirthdayTickerLabel({ withinDays: 60, rotateWindowDays: 14, rotateEveryMs: 3500 });
+  // Today auto-scroll (UI-only behaviour). Keeps manual scrolling enabled.
+  const todayScrollRef = useRef<ScrollView | null>(null);
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [todayRowHeight, setTodayRowHeight] = useState<number>(0);
+  const [todayIndex, setTodayIndex] = useState<number>(0);
+  const [todayUserInteracting, setTodayUserInteracting] = useState<boolean>(false);
+
+  const maxTodayScrollHeight = useMemo(() => {
+    if (!todayRowHeight) return 190;
+    return todayRowHeight * TODAY_VISIBLE_ROWS;
+  }, [todayRowHeight]);
+
+  const clampTodayIndex = (n: number) => {
+    const max = Math.max(0, TODAY_ITEMS.length - 1);
+    return Math.min(max, Math.max(0, n));
+  };
+
+
 
   const onMenuPress = () => {
     // Placeholder for future “all features / menu”
     // Intentionally no navigation yet (Phase 1).
   };
+
+  const onTodayScrollBegin = () => {
+    setTodayUserInteracting(true);
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    resumeTimerRef.current = null;
+  };
+
+  const onTodayScrollEnd = () => {
+    if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+    resumeTimerRef.current = setTimeout(() => {
+      setTodayUserInteracting(false);
+    }, TODAY_RESUME_DELAY_MS);
+  };
+
+  const onTodayMomentumEnd = (y: number) => {
+    if (!todayRowHeight) return;
+    const next = clampTodayIndex(Math.round(y / todayRowHeight));
+    setTodayIndex(next);
+  };
+
+  useEffect(() => {
+    // Start/refresh auto-scroll timer.
+    if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+    autoTimerRef.current = null;
+
+    if (!todayRowHeight) return;
+    if (todayUserInteracting) return;
+
+    autoTimerRef.current = setInterval(() => {
+      setTodayIndex((prev) => {
+        const next = prev + 1 >= TODAY_ITEMS.length ? 0 : prev + 1;
+        return next;
+      });
+    }, TODAY_AUTO_SCROLL_MS);
+
+    return () => {
+      if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+      autoTimerRef.current = null;
+    };
+  }, [todayRowHeight, todayUserInteracting]);
+
+  useEffect(() => {
+    // Scroll when index changes (auto mode).
+    if (todayUserInteracting) return;
+    if (!todayRowHeight) return;
+    todayScrollRef.current?.scrollTo({ y: todayIndex * todayRowHeight, animated: true });
+  }, [todayIndex, todayRowHeight, todayUserInteracting]);
+
+  useEffect(() => {
+    return () => {
+      if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
+      if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+    };
+  }, []);
+
+
 
   const switchTab = (tab: keyof MainTabParamList) => {
     const parent = (navigation as any).getParent?.();
@@ -123,13 +205,25 @@ export default function HomeScreen() {
           <Text style={styles.todayHeader}>Here’s what’s happening today</Text>
 
           <ScrollView
-            style={styles.todayList}
+            ref={(r) => { todayScrollRef.current = r; }}
+            style={[styles.todayList, { maxHeight: maxTodayScrollHeight }]}
             contentContainerStyle={styles.todayListContent}
             showsVerticalScrollIndicator={true}
             nestedScrollEnabled={true}
+            onScrollBeginDrag={onTodayScrollBegin}
+            onScrollEndDrag={onTodayScrollEnd}
+            onMomentumScrollBegin={onTodayScrollBegin}
+            onMomentumScrollEnd={(e) => { onTodayScrollEnd(); onTodayMomentumEnd(e.nativeEvent.contentOffset.y); }}
+            scrollEventThrottle={16}
           >
             {TODAY_ITEMS.map((item, index) => (
-              <View key={item.id} style={[styles.todayRow, index === 0 && styles.todayRowFirst]}>
+              <View
+                key={item.id}
+                style={[styles.todayRow, index === 0 && styles.todayRowFirst]}
+                onLayout={(e) => {
+                  if (index === 0 && !todayRowHeight) setTodayRowHeight(e.nativeEvent.layout.height);
+                }}
+              >
                 <View style={styles.todayIconWrap}>
                   <Ionicons name={item.icon} size={18} color={stylesVars.inkMuted} />
                 </View>
