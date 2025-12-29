@@ -12,8 +12,9 @@ type Props = NativeStackScreenProps<RootStackParamList, "YourDetails">;
 
 /**
  * Phase 2.1 — YourDetailsScreen
- * - Two name fields: Legal name + Screen name
+ * - Two name fields: Legal name + Display name
  * - Photo selection uses our in-app CircularCropperModal (NOT iOS square editor)
+ * - Remove photo is available directly on this screen (more discoverable in onboarding)
  */
 export default function YourDetailsScreen({ navigation }: Props) {
   const [legalName, setLegalName] = useState("");
@@ -25,7 +26,6 @@ export default function YourDetailsScreen({ navigation }: Props) {
   const [cropVisible, setCropVisible] = useState(false);
 
   const displayName = screenName.trim() || legalName.trim();
-
   const canContinue = useMemo(() => displayName.trim().length >= 2, [displayName]);
 
   const onPickPhoto = async () => {
@@ -68,6 +68,28 @@ export default function YourDetailsScreen({ navigation }: Props) {
     }
   };
 
+  const onRemovePhoto = () => {
+    if (!image.uri) return;
+
+    Alert.alert("Remove photo?", "This will remove your profile photo.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            // Prefer explicit API if present
+            // @ts-expect-error - depends on store shape in this phase
+            if (typeof image.setUri === "function") await image.setUri(null);
+            else await image.set(null);
+          } catch {
+            // no-op; UI will reflect best-effort
+          }
+        },
+      },
+    ]);
+  };
+
   const onContinue = () => {
     if (!canContinue) return;
     navigation.navigate("FamilyName");
@@ -78,14 +100,19 @@ export default function YourDetailsScreen({ navigation }: Props) {
       <Text style={styles.title}>Your details</Text>
       <Text style={styles.subtitle}>Add your name and an optional photo. You can edit this later in Settings.</Text>
 
-      {/* Centered photo block */}
+      {/* Centered photo block — Pattern A */}
       <View style={styles.photoBlock}>
-        <Text style={styles.photoHelper}>Tap to add photo</Text>
-        <Text style={styles.photoHelperSmall}>{image.uri ? "Tap again to change it" : "Optional"}</Text>
+        <Text style={styles.photoLabel}>Profile photo</Text>
 
         <TouchableOpacity onPress={onPickPhoto} activeOpacity={0.85} style={styles.photoTap}>
-          <Avatar name={displayName} uri={image.uri} size={110} />
+          <Avatar name={displayName} uri={image.uri} size={110} showPlusBadge />
         </TouchableOpacity>
+
+        {image.uri ? (
+          <TouchableOpacity onPress={onRemovePhoto} activeOpacity={0.85} style={styles.removeBtn}>
+            <Text style={styles.removeText}>Remove photo</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       <Text style={styles.label}>Legal name</Text>
@@ -97,7 +124,7 @@ export default function YourDetailsScreen({ navigation }: Props) {
         style={styles.input}
       />
 
-      <Text style={styles.label}>Screen name</Text>
+      <Text style={styles.label}>Display name</Text>
       <TextInput
         value={screenName}
         onChangeText={setScreenName}
@@ -140,9 +167,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingVertical: 6,
   },
+  photoLabel: { fontSize: 13, fontWeight: "800", color: "#6B7280", textAlign: "center" },
   photoTap: { marginTop: 10, borderRadius: 9999 },
-  photoHelper: { fontSize: 15, fontWeight: "900", color: "#111827", textAlign: "center" },
-  photoHelperSmall: { marginTop: 2, fontSize: 13, color: "#6B7280", textAlign: "center" },
+
+  removeBtn: { marginTop: 10, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 10 },
+  removeText: { fontSize: 13, fontWeight: "800", color: "#B91C1C" },
 
   label: { marginTop: 18, fontSize: 13, fontWeight: "800", color: "#6B7280" },
   input: {

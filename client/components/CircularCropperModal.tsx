@@ -343,18 +343,18 @@ export default function CircularCropperModal({ visible, uri, title, onCancel, on
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0B0F19" },
-  safeHeader: { backgroundColor: "#0B0F19" },
+  container: { flex: 1, backgroundColor: "#FFFFFF" },
+  safeHeader: { backgroundColor: "#FFFFFF" },
   header: {
-    paddingTop: 10,
+    paddingTop: 14,
     paddingHorizontal: 14,
-    paddingBottom: 10,
+    paddingBottom: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  headerTitle: { color: "#FFFFFF", fontWeight: "900", fontSize: 16 },
-  headerLink: { color: "#FFFFFF", fontWeight: "800", fontSize: 15 },
+  headerTitle: { color: "#111827", fontWeight: "900", fontSize: 17 },
+  headerLink: { color: "#111827", fontWeight: "800", fontSize: 15 },
 
   editorWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
   editor: {
@@ -389,17 +389,17 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "#F3F4F6",
     alignItems: "center",
     justifyContent: "center",
   },
-  zoomText: { color: "#FFFFFF", fontWeight: "900", fontSize: 22, marginTop: -1 },
-  zoomLabel: { color: "#E5E7EB", fontWeight: "800" },
+  zoomText: { color: "#111827", fontWeight: "900", fontSize: 22, marginTop: -1 },
+  zoomLabel: { color: "#374151", fontWeight: "800" },
 
   hint: {
     paddingHorizontal: 16,
     paddingBottom: 18,
-    color: "#9CA3AF",
+    color: "#6B7280",
     fontSize: 12,
     lineHeight: 16,
     textAlign: "center",
