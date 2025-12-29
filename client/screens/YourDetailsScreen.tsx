@@ -86,7 +86,7 @@ export default function YourDetailsScreen({ navigation }: Props) {
       <TextInput
         value={displayName}
         onChangeText={setDisplayName}
-        placeholder="e.g. Mark"
+        placeholder="e.g. Jordan, Mum, Dad"
         autoCapitalize="words"
         textContentType={Platform.OS === "ios" ? "nickname" : "none"}
         style={styles.input}
