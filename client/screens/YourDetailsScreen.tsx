@@ -12,7 +12,7 @@ import { useIdentityImage } from "../data/identityImagesStore";
  * - Photo is optional and chosen by tapping the circle.
  * - Two fields:
  *    1) Your name (private / for records)
- *    2) Name shown to family (used across the app)
+ *    2) Display name (used across the app)
  * - Avatar uses displayName only so placeholder shows 📷 until typing or photo.
  */
 type Props = NativeStackScreenProps<RootStackParamList, "YourDetails">;
@@ -81,7 +81,7 @@ export default function YourDetailsScreen({ navigation }: Props) {
         returnKeyType="next"
       />
 
-      <Text style={styles.label}>Name shown to family</Text>
+      <Text style={styles.label}>Display name</Text>
       <Text style={styles.helper}>This is how you’ll appear across FamilySync.</Text>
       <TextInput
         value={displayName}
