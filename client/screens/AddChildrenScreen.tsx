@@ -182,7 +182,7 @@ export default function AddChildrenScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Add children to your family</Text>
+      <Text style={styles.title}>Add children</Text>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 18 }}>
         {children.map((child, index) => {
