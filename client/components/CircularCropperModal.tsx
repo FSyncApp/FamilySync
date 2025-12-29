@@ -12,6 +12,7 @@ import {
   Platform,
 } from "react-native";
 import * as ImageManipulator from "expo-image-manipulator";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 /**
  * Phase 2.1.2o — Cropper: restore taps + explicit back, keep no-swipe
@@ -48,6 +49,7 @@ function makeEven(n: number) {
 }
 
 export default function CircularCropperModal({ visible, uri, title, onCancel, onDone }: CircularCropperModalProps) {
+  const insets = useSafeAreaInsets();
   const [frame, setFrame] = useState(320);
   const [imgSize, setImgSize] = useState<ImgSize | null>(null);
 
@@ -83,12 +85,15 @@ export default function CircularCropperModal({ visible, uri, title, onCancel, on
   }, [uri]);
 
   const hole = useMemo(() => Math.max(200, makeEven(frame * circleRatio)), [frame]);
+  const PAN_PADDING = Math.round(hole * 0.18);
   const radius = hole / 2;
 
   const baseScale = useMemo(() => {
     if (!imgSize) return 1;
-    return Math.max(hole / imgSize.w, hole / imgSize.h);
-  }, [imgSize, hole]);
+    // Give a little extra coverage so users can pan at minimum zoom (WhatsApp-like feel).
+    const target = hole + PAN_PADDING;
+    return Math.max(target / imgSize.w, target / imgSize.h);
+  }, [imgSize, hole, PAN_PADDING]);
 
   const BLEED = 22;
 
@@ -281,7 +286,7 @@ export default function CircularCropperModal({ visible, uri, title, onCancel, on
       supportedOrientations={["portrait"]}
     >
       <View style={styles.container}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: (insets?.top ?? 0) + 10 }]}>
           <TouchableOpacity onPress={onCancel} hitSlop={10}>
             <Text style={styles.headerLink}>Back</Text>
           </TouchableOpacity>
@@ -294,6 +299,15 @@ export default function CircularCropperModal({ visible, uri, title, onCancel, on
         <View style={styles.editorWrap}>
           <View style={styles.editor} onLayout={onLayoutFrame} {...editorResponder.panHandlers}>
             {uri ? (
+              <Image
+                source={{ uri }}
+                style={styles.blurredBg}
+                resizeMode="cover"
+                blurRadius={28}
+              />
+            ) : null}
+
+            {uri ? (
               <Animated.Image
                 source={{ uri }}
                 style={[
@@ -301,7 +315,7 @@ export default function CircularCropperModal({ visible, uri, title, onCancel, on
                   {
                     width: imgSize ? imgSize.w * baseScale : hole,
                     height: imgSize ? imgSize.h * baseScale : hole,
-                    transform: [{ translateX: pan.x }, { translateY: pan.y }, { scale }],
+                    transform: [{ scale }, { translateX: pan.x }, { translateY: pan.y }],
                   },
                 ]}
                 resizeMode="cover"
