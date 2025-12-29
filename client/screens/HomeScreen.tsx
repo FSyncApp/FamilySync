@@ -111,8 +111,7 @@ export default function HomeScreen() {
   };
 
   const onMenuPress = () => {
-    // Placeholder for future “all features / menu”
-    // Intentionally no navigation yet (Phase 1).
+    (navigation as any).navigate("Bills");
   };
 
   const onTodayScrollBegin = () => {
