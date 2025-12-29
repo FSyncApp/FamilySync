@@ -16,9 +16,9 @@ import * as ImageManipulator from "expo-image-manipulator";
 /**
  * Circular crop overlay editor (Phase 2.1):
  * - Shows a circular guide (no dimming)
- * - Single-finger drag to position
- * - Two-finger pinch to zoom (simultaneous with drag via midpoint)
- * - Zoom via +/- buttons (stable fallback)
+ * - Single-finger drag to position (must not dismiss modal)
+ * - Two-finger pinch to zoom (works together with drag via centroid delta)
+ * - Zoom via +/- buttons (kept in sync with pinch scale)
  * - Crops a square output that will be displayed as a circle elsewhere
  *
  * IMPORTANT: iOS Photo Library can return "ph://..." URIs, which RN <Image> can't render.
@@ -71,27 +71,22 @@ export default function CircularCropperModal({
 }: CircularCropperModalProps) {
   const win = Dimensions.get("window");
 
-  // Circle guide is sized from the window, but we clamp against whichever is smaller (frame vs guide)
-  const guideSize = Math.min(win.width, win.height) - 140;
-
-  const [frame, setFrame] = useState(320); // square editor size (px) – will be measured onLayout
+  const [frame, setFrame] = useState<number | null>(null);
   const [imgSize, setImgSize] = useState<ImgSize | null>(null);
   const [sourceUri, setSourceUri] = useState<string | null>(null);
 
-  // User-controlled transform
   const [userScale, setUserScale] = useState(1);
   const [tx, setTx] = useState(0);
   const [ty, setTy] = useState(0);
 
-  // Gesture refs (avoid stale closure issues)
   const startTx = useRef(0);
   const startTy = useRef(0);
   const startScale = useRef(1);
 
   const pinchStartDist = useRef<number | null>(null);
   const pinchStartMid = useRef<{ x: number; y: number } | null>(null);
+  const lastTouchCount = useRef(0);
 
-  // Materialize (ph:// -> file://) when opening / uri changes
   useEffect(() => {
     let cancelled = false;
 
@@ -114,7 +109,6 @@ export default function CircularCropperModal({
     };
   }, [uri, visible]);
 
-  // Load image dimensions
   useEffect(() => {
     if (!sourceUri) return;
     Image.getSize(
@@ -124,29 +118,34 @@ export default function CircularCropperModal({
     );
   }, [sourceUri]);
 
-  // Reset when opened/new uri
-  useEffect(() => {
-    if (!visible) return;
-    setUserScale(1);
-    setTx(0);
-    setTy(0);
-    startTx.current = 0;
-    startTy.current = 0;
-    startScale.current = 1;
-    pinchStartDist.current = null;
-    pinchStartMid.current = null;
-  }, [visible, sourceUri]);
+  const guideSize = useMemo(() => {
+    const raw = Math.min(win.width, win.height) - 140;
+    if (!frame) return Math.max(180, raw);
+    return Math.max(180, Math.min(frame, raw));
+  }, [win.width, win.height, frame]);
+
+  const D = guideSize;
 
   const baseScale = useMemo(() => {
     if (!imgSize) return 1;
-    // cover the square frame
-    return Math.max(frame / imgSize.w, frame / imgSize.h);
-  }, [imgSize, frame]);
+    return Math.max(D / imgSize.w, D / imgSize.h);
+  }, [imgSize, D]);
 
   const effectiveScale = baseScale * userScale;
+  const ready = !!visible && !!sourceUri && !!imgSize && !!frame && frame > 0;
 
-  // We clamp against the circle's diameter (guideSize) where possible so dragging feels "free" like WhatsApp.
-  const clampTarget = useMemo(() => Math.min(frame, guideSize), [frame, guideSize]);
+  useEffect(() => {
+    if (!visible) return;
+    lastTouchCount.current = 0;
+    pinchStartDist.current = null;
+    pinchStartMid.current = null;
+    startTx.current = 0;
+    startTy.current = 0;
+    startScale.current = 1;
+    setTx(0);
+    setTy(0);
+    setUserScale(1);
+  }, [visible, sourceUri]);
 
   const clampTranslation = (nextTx: number, nextTy: number, scaleOverride?: number) => {
     if (!imgSize) return { x: nextTx, y: nextTy };
@@ -155,13 +154,13 @@ export default function CircularCropperModal({
     const scaledW = imgSize.w * scale;
     const scaledH = imgSize.h * scale;
 
-    // image is centered; allow moving within bounds
-    const maxX = Math.max(0, (scaledW - clampTarget) / 2);
-    const maxY = Math.max(0, (scaledH - clampTarget) / 2);
+    const maxX = Math.max(0, (scaledW - D) / 2);
+    const maxY = Math.max(0, (scaledH - D) / 2);
 
-    const x = Math.max(-maxX, Math.min(maxX, nextTx));
-    const y = Math.max(-maxY, Math.min(maxY, nextTy));
-    return { x, y };
+    return {
+      x: clamp(nextTx, -maxX, maxX),
+      y: clamp(nextTy, -maxY, maxY),
+    };
   };
 
   const panResponder = useMemo(
@@ -169,6 +168,8 @@ export default function CircularCropperModal({
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
 
         onPanResponderGrant: (evt) => {
           startTx.current = tx;
@@ -176,6 +177,8 @@ export default function CircularCropperModal({
           startScale.current = userScale;
 
           const touches = evt.nativeEvent.touches ?? [];
+          lastTouchCount.current = touches.length;
+
           if (touches.length >= 2) {
             const a = { x: touches[0].pageX, y: touches[0].pageY };
             const b = { x: touches[1].pageX, y: touches[1].pageY };
@@ -188,10 +191,30 @@ export default function CircularCropperModal({
         },
 
         onPanResponderMove: (evt, gesture) => {
-          const touches = evt.nativeEvent.touches ?? [];
+          if (!ready) return;
 
-          // Two-finger pinch (simultaneous zoom + midpoint drag)
-          if (touches.length >= 2) {
+          const touches = evt.nativeEvent.touches ?? [];
+          const touchCount = touches.length;
+
+          if (touchCount !== lastTouchCount.current) {
+            startTx.current = tx;
+            startTy.current = ty;
+            startScale.current = userScale;
+
+            if (touchCount >= 2) {
+              const a = { x: touches[0].pageX, y: touches[0].pageY };
+              const b = { x: touches[1].pageX, y: touches[1].pageY };
+              pinchStartDist.current = distance(a, b);
+              pinchStartMid.current = midpoint(a, b);
+            } else {
+              pinchStartDist.current = null;
+              pinchStartMid.current = null;
+            }
+
+            lastTouchCount.current = touchCount;
+          }
+
+          if (touchCount >= 2) {
             const a = { x: touches[0].pageX, y: touches[0].pageY };
             const b = { x: touches[1].pageX, y: touches[1].pageY };
             const d = distance(a, b);
@@ -200,16 +223,14 @@ export default function CircularCropperModal({
             const startD = pinchStartDist.current ?? d;
             const startM = pinchStartMid.current ?? mid;
 
-            // scale
             const rawScale = startScale.current * (d / Math.max(1, startD));
             const nextUserScale = clamp(rawScale, 1, 3);
 
-            // translation: follow the pinch midpoint (feels like WhatsApp)
             const dx = mid.x - startM.x;
             const dy = mid.y - startM.y;
 
-            const nextScaleEffective = baseScale * nextUserScale;
-            const next = clampTranslation(startTx.current + dx, startTy.current + dy, nextScaleEffective);
+            const nextEffectiveScale = baseScale * nextUserScale;
+            const next = clampTranslation(startTx.current + dx, startTy.current + dy, nextEffectiveScale);
 
             setUserScale(nextUserScale);
             setTx(next.x);
@@ -217,47 +238,49 @@ export default function CircularCropperModal({
             return;
           }
 
-          // One-finger drag
           const next = clampTranslation(startTx.current + gesture.dx, startTy.current + gesture.dy);
           setTx(next.x);
           setTy(next.y);
         },
 
         onPanResponderRelease: () => {
+          const next = clampTranslation(tx, ty);
+          setTx(next.x);
+          setTy(next.y);
+
           pinchStartDist.current = null;
           pinchStartMid.current = null;
-          startTx.current = tx;
-          startTy.current = ty;
-          startScale.current = userScale;
+          lastTouchCount.current = 0;
         },
 
         onPanResponderTerminate: () => {
           pinchStartDist.current = null;
           pinchStartMid.current = null;
+          lastTouchCount.current = 0;
         },
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [tx, ty, userScale, imgSize, effectiveScale, baseScale, frame, clampTarget]
+    [ready, tx, ty, userScale, imgSize, baseScale, effectiveScale, D]
   );
 
   const onLayoutFrame = (e: LayoutChangeEvent) => {
-    const w = e.nativeEvent.layout.width;
-    if (w && Math.abs(w - frame) > 2) setFrame(Math.round(w));
+    const w = Math.round(e.nativeEvent.layout.width);
+    if (!w) return;
+    if (!frame || Math.abs(w - frame) > 2) setFrame(w);
   };
 
   const zoomBy = (delta: number) => {
     const nextUserScale = clamp(+(userScale + delta).toFixed(2), 1, 3);
-    setUserScale(nextUserScale);
+    const nextEffectiveScale = baseScale * nextUserScale;
+    const next = clampTranslation(tx, ty, nextEffectiveScale);
 
-    // re-clamp after scale change
-    const nextScaleEffective = baseScale * nextUserScale;
-    const next = clampTranslation(tx, ty, nextScaleEffective);
+    setUserScale(nextUserScale);
     setTx(next.x);
     setTy(next.y);
   };
 
   const handleDone = async () => {
-    if (!sourceUri || !imgSize) return;
+    if (!sourceUri || !imgSize || !frame) return;
 
     const cropSize = frame / effectiveScale;
 
@@ -285,7 +308,12 @@ export default function CircularCropperModal({
   const topPad = Platform.OS === "ios" ? 14 : 10;
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onCancel}>
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle={Platform.OS === "ios" ? "overFullScreen" : "fullScreen"}
+      onRequestClose={onCancel}
+    >
       <View style={styles.container}>
         <View style={[styles.header, { paddingTop: topPad }]}>
           <TouchableOpacity onPress={onCancel} hitSlop={12}>
@@ -302,13 +330,19 @@ export default function CircularCropperModal({
         <View style={styles.body}>
           <View style={styles.frameWrap} onLayout={onLayoutFrame}>
             <View style={styles.frame} {...panResponder.panHandlers}>
-              {!!sourceUri && (
+              {ready && imgSize && (
                 <Image
-                  source={{ uri: sourceUri }}
+                  source={{ uri: sourceUri! }}
                   style={[
                     styles.image,
                     {
-                      transform: [{ translateX: tx }, { translateY: ty }, { scale: effectiveScale }],
+                      width: imgSize.w,
+                      height: imgSize.h,
+                      left: "50%",
+                      top: "50%",
+                      marginLeft: -imgSize.w / 2,
+                      marginTop: -imgSize.h / 2,
+                      transform: [{ scale: effectiveScale }, { translateX: tx }, { translateY: ty }],
                     },
                   ]}
                   resizeMode="cover"
@@ -316,9 +350,8 @@ export default function CircularCropperModal({
               )}
             </View>
 
-            {/* Circle guide overlay (no dimming) */}
             <View pointerEvents="none" style={styles.circleGuideWrap}>
-              <View style={[styles.circleGuide, { width: guideSize, height: guideSize, borderRadius: guideSize / 2 }]} />
+              <View style={[styles.circleGuide, { width: D, height: D, borderRadius: D / 2 }]} />
             </View>
           </View>
 
@@ -366,11 +399,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  image: {
-    // Start centered, scale/translate from center
-    width: "100%",
-    height: "100%",
-  },
+  image: { position: "absolute" },
 
   circleGuideWrap: {
     position: "absolute",
@@ -381,10 +410,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  circleGuide: {
-    borderWidth: 3,
-    borderColor: "rgba(255,255,255,0.95)",
-  },
+  circleGuide: { borderWidth: 3, borderColor: "rgba(255,255,255,0.95)" },
 
   controls: { marginTop: 16, flexDirection: "row", alignItems: "center", gap: 16 },
   zoomBtn: {
