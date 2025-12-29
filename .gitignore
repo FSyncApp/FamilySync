@@ -106,3 +106,4 @@ _patches/
 
 # Local editor/patch backups
 *.bak.*
+.cursor/
