@@ -12,20 +12,19 @@ type Props = NativeStackScreenProps<RootStackParamList, "YourDetails">;
 
 /**
  * Phase 2.1 — YourDetailsScreen
- * - Two name fields: Legal name + Name shown to family (short label)
+ * - Two name fields: Legal name + Screen name
  * - Photo selection uses our in-app CircularCropperModal (NOT iOS square editor)
- *   so we can show the circular guide overlay consistently.
  */
 export default function YourDetailsScreen({ navigation }: Props) {
   const [legalName, setLegalName] = useState("");
-  const [familyName, setFamilyName] = useState("");
+  const [screenName, setScreenName] = useState("");
   const image = useIdentityImage("profile:self");
 
   // Cropper modal state
   const [pendingUri, setPendingUri] = useState<string | null>(null);
   const [cropVisible, setCropVisible] = useState(false);
 
-  const displayName = familyName.trim() || legalName.trim();
+  const displayName = screenName.trim() || legalName.trim();
 
   const canContinue = useMemo(() => displayName.trim().length >= 2, [displayName]);
 
@@ -79,31 +78,30 @@ export default function YourDetailsScreen({ navigation }: Props) {
       <Text style={styles.title}>Your details</Text>
       <Text style={styles.subtitle}>Add your name and an optional photo. You can edit this later in Settings.</Text>
 
-      <View style={styles.photoRow}>
-        <TouchableOpacity onPress={onPickPhoto} activeOpacity={0.85} style={styles.photoTap}>
-          <Avatar name={displayName} uri={image.uri} size={94} />
-        </TouchableOpacity>
+      {/* Centered photo block */}
+      <View style={styles.photoBlock}>
+        <Text style={styles.photoHelper}>Tap to add photo</Text>
+        <Text style={styles.photoHelperSmall}>{image.uri ? "Tap again to change it" : "Optional"}</Text>
 
-        <View style={{ flex: 1 }}>
-          <Text style={styles.photoHelper}>Tap the circle to choose a photo</Text>
-          <Text style={styles.photoHelperSmall}>{image.uri ? "Tap again to change it" : "Optional"}</Text>
-        </View>
+        <TouchableOpacity onPress={onPickPhoto} activeOpacity={0.85} style={styles.photoTap}>
+          <Avatar name={displayName} uri={image.uri} size={110} />
+        </TouchableOpacity>
       </View>
 
       <Text style={styles.label}>Legal name</Text>
       <TextInput
         value={legalName}
         onChangeText={setLegalName}
-        placeholder="e.g. Mark Robson"
+        placeholder="e.g. Jane Smith"
         autoCapitalize="words"
         style={styles.input}
       />
 
-      <Text style={styles.label}>Name shown to family</Text>
+      <Text style={styles.label}>Screen name</Text>
       <TextInput
-        value={familyName}
-        onChangeText={setFamilyName}
-        placeholder="e.g. Mark"
+        value={screenName}
+        onChangeText={setScreenName}
+        placeholder="e.g. Jane, Mum, Dad"
         autoCapitalize="words"
         style={styles.input}
       />
@@ -136,10 +134,15 @@ const styles = StyleSheet.create({
   title: { fontSize: 28, fontWeight: "900", color: "#111827" },
   subtitle: { marginTop: 8, fontSize: 15, lineHeight: 20, color: "#4B5563" },
 
-  photoRow: { marginTop: 16, flexDirection: "row", alignItems: "center", gap: 14 },
-  photoTap: { borderRadius: 9999 },
-  photoHelper: { fontSize: 15, fontWeight: "800", color: "#111827" },
-  photoHelperSmall: { marginTop: 2, fontSize: 13, color: "#6B7280" },
+  photoBlock: {
+    marginTop: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+  },
+  photoTap: { marginTop: 10, borderRadius: 9999 },
+  photoHelper: { fontSize: 15, fontWeight: "900", color: "#111827", textAlign: "center" },
+  photoHelperSmall: { marginTop: 2, fontSize: 13, color: "#6B7280", textAlign: "center" },
 
   label: { marginTop: 18, fontSize: 13, fontWeight: "800", color: "#6B7280" },
   input: {
