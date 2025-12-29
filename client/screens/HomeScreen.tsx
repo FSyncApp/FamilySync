@@ -34,8 +34,7 @@ const TODAY_ITEMS: TodayItem[] = [
 const TODAY_VISIBLE_ROWS = 4;
 const TODAY_AUTO_SCROLL_MS = 4500; // slow, calm
 const TODAY_RESUME_DELAY_MS = 1800; // after user interaction
-
-
+const TODAY_SCROLL_ANIM_GUARD_MS = 650; // normalize after animated scroll finishes (approx)
 
 /**
  * Home v1.4.3 Shortcuts (LOCKED 2×3)
@@ -67,26 +66,49 @@ export default function HomeScreen() {
   const navigation = useNavigation<BottomTabNavigationProp<any>>();
 
   const birthdayTicker = useBirthdayTickerLabel({ withinDays: 60, rotateWindowDays: 14, rotateEveryMs: 3500 });
+
   // Today auto-scroll (UI-only behaviour). Keeps manual scrolling enabled.
+  // This is implemented as a seamless loop by duplicating the list and normalising the scroll offset
+  // back into the first "cycle" once we pass the midpoint.
   const todayScrollRef = useRef<ScrollView | null>(null);
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const normalizeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentOffsetRef = useRef<number>(0);
 
   const [todayRowHeight, setTodayRowHeight] = useState<number>(0);
-  const [todayIndex, setTodayIndex] = useState<number>(0);
   const [todayUserInteracting, setTodayUserInteracting] = useState<boolean>(false);
+
+  const todayLoopItems = useMemo(() => [...TODAY_ITEMS, ...TODAY_ITEMS], []);
+
+  const todayCycleHeight = useMemo(() => {
+    if (!todayRowHeight) return 0;
+    return todayRowHeight * TODAY_ITEMS.length;
+  }, [todayRowHeight]);
 
   const maxTodayScrollHeight = useMemo(() => {
     if (!todayRowHeight) return 190;
     return todayRowHeight * TODAY_VISIBLE_ROWS;
   }, [todayRowHeight]);
 
-  const clampTodayIndex = (n: number) => {
-    const max = Math.max(0, TODAY_ITEMS.length - 1);
-    return Math.min(max, Math.max(0, n));
+  const clearNormalizeTimer = () => {
+    if (normalizeTimerRef.current) clearTimeout(normalizeTimerRef.current);
+    normalizeTimerRef.current = null;
   };
 
-
+  const normalizeIfNeeded = (y: number) => {
+    if (!todayCycleHeight) return;
+    // Keep the scroll position within the first cycle for a seamless loop illusion.
+    if (y >= todayCycleHeight) {
+      const nextY = y - todayCycleHeight;
+      todayScrollRef.current?.scrollTo({ y: nextY, animated: false });
+      currentOffsetRef.current = nextY;
+    } else if (y < 0) {
+      const nextY = y + todayCycleHeight;
+      todayScrollRef.current?.scrollTo({ y: nextY, animated: false });
+      currentOffsetRef.current = nextY;
+    }
+  };
 
   const onMenuPress = () => {
     // Placeholder for future “all features / menu”
@@ -97,6 +119,7 @@ export default function HomeScreen() {
     setTodayUserInteracting(true);
     if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
     resumeTimerRef.current = null;
+    clearNormalizeTimer();
   };
 
   const onTodayScrollEnd = () => {
@@ -104,12 +127,6 @@ export default function HomeScreen() {
     resumeTimerRef.current = setTimeout(() => {
       setTodayUserInteracting(false);
     }, TODAY_RESUME_DELAY_MS);
-  };
-
-  const onTodayMomentumEnd = (y: number) => {
-    if (!todayRowHeight) return;
-    const next = clampTodayIndex(Math.round(y / todayRowHeight));
-    setTodayIndex(next);
   };
 
   useEffect(() => {
@@ -121,33 +138,32 @@ export default function HomeScreen() {
     if (todayUserInteracting) return;
 
     autoTimerRef.current = setInterval(() => {
-      setTodayIndex((prev) => {
-        const next = prev + 1 >= TODAY_ITEMS.length ? 0 : prev + 1;
-        return next;
-      });
+      if (todayUserInteracting) return;
+      const targetY = currentOffsetRef.current + todayRowHeight;
+
+      todayScrollRef.current?.scrollTo({ y: targetY, animated: true });
+
+      // After the animated scroll completes, normalise back into the first cycle if we crossed the midpoint.
+      clearNormalizeTimer();
+      normalizeTimerRef.current = setTimeout(() => {
+        if (todayUserInteracting) return;
+        normalizeIfNeeded(currentOffsetRef.current);
+      }, TODAY_SCROLL_ANIM_GUARD_MS);
     }, TODAY_AUTO_SCROLL_MS);
 
     return () => {
       if (autoTimerRef.current) clearInterval(autoTimerRef.current);
       autoTimerRef.current = null;
     };
-  }, [todayRowHeight, todayUserInteracting]);
-
-  useEffect(() => {
-    // Scroll when index changes (auto mode).
-    if (todayUserInteracting) return;
-    if (!todayRowHeight) return;
-    todayScrollRef.current?.scrollTo({ y: todayIndex * todayRowHeight, animated: true });
-  }, [todayIndex, todayRowHeight, todayUserInteracting]);
+  }, [todayRowHeight, todayUserInteracting, todayCycleHeight]);
 
   useEffect(() => {
     return () => {
       if (resumeTimerRef.current) clearTimeout(resumeTimerRef.current);
       if (autoTimerRef.current) clearInterval(autoTimerRef.current);
+      clearNormalizeTimer();
     };
   }, []);
-
-
 
   const switchTab = (tab: keyof MainTabParamList) => {
     const parent = (navigation as any).getParent?.();
@@ -205,21 +221,35 @@ export default function HomeScreen() {
           <Text style={styles.todayHeader}>Here’s what’s happening today</Text>
 
           <ScrollView
-            ref={(r) => { todayScrollRef.current = r; }}
+            ref={(r) => {
+              todayScrollRef.current = r;
+            }}
             style={[styles.todayList, { maxHeight: maxTodayScrollHeight }]}
             contentContainerStyle={styles.todayListContent}
             showsVerticalScrollIndicator={true}
             nestedScrollEnabled={true}
+            onScroll={(e) => {
+              const y = e.nativeEvent.contentOffset.y;
+              currentOffsetRef.current = y;
+            }}
             onScrollBeginDrag={onTodayScrollBegin}
-            onScrollEndDrag={onTodayScrollEnd}
+            onScrollEndDrag={() => {
+              onTodayScrollEnd();
+              normalizeIfNeeded(currentOffsetRef.current);
+            }}
             onMomentumScrollBegin={onTodayScrollBegin}
-            onMomentumScrollEnd={(e) => { onTodayScrollEnd(); onTodayMomentumEnd(e.nativeEvent.contentOffset.y); }}
+            onMomentumScrollEnd={(e) => {
+              onTodayScrollEnd();
+              const y = e.nativeEvent.contentOffset.y;
+              currentOffsetRef.current = y;
+              normalizeIfNeeded(y);
+            }}
             scrollEventThrottle={16}
           >
-            {TODAY_ITEMS.map((item, index) => (
+            {todayLoopItems.map((item, index) => (
               <View
-                key={item.id}
-                style={[styles.todayRow, index === 0 && styles.todayRowFirst]}
+                key={`${item.id}-${index}`}
+                style={[styles.todayRow, index % TODAY_ITEMS.length === 0 && styles.todayRowFirst]}
                 onLayout={(e) => {
                   if (index === 0 && !todayRowHeight) setTodayRowHeight(e.nativeEvent.layout.height);
                 }}
@@ -383,7 +413,7 @@ const styles = StyleSheet.create({
     borderTopColor: stylesVars.border,
   },
 
-  // First row should feel “attached” to the card header (no divider above it)
+  // First row of each loop cycle should feel “attached” to the card header (no divider above it)
   todayRowFirst: {
     borderTopWidth: 0,
   },
