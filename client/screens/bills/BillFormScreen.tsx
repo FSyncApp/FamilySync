@@ -1,4 +1,3 @@
-/** FS PATCH MARKER: Bills v0 UX cleanup (form view/edit/delete) */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -47,7 +46,7 @@ export default function BillFormScreen() {
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
 
-  // existing bills open read-only until Edit
+  // Existing bills open read-only until Edit.
   const [isEditing, setIsEditing] = useState(mode === "create");
 
   const [createdAt, setCreatedAt] = useState<string | undefined>(undefined);
@@ -66,25 +65,33 @@ export default function BillFormScreen() {
   }, [navigation, title]);
 
   const load = useCallback(async () => {
-    if (mode !== "edit" || !billId) return;
+    if (mode !== "edit") return;
+
+    if (!billId) {
+      Alert.alert("Missing bill", "No bill was provided to open.");
+      navigation.goBack();
+      return;
+    }
+
     setLoading(true);
     try {
       const bill = await getBillById(billId);
+
       if (!bill) {
         Alert.alert("Not found", "That bill no longer exists.");
         navigation.goBack();
         return;
       }
 
-      // Only use stable v0 fields: name, amount, created_at
-      setName(bill.name ?? "");
-      setAmountText(Number(bill.amount ?? 0).toFixed(2));
+      // v0 fields only: name, amount, created_at
+      const loadedName = bill.name ?? "";
+      const loadedAmountText = Number(bill.amount ?? 0).toFixed(2);
+
+      setName(loadedName);
+      setAmountText(loadedAmountText);
       setCreatedAt(bill.created_at);
 
-      originalRef.current = {
-        name: bill.name ?? "",
-        amountText: Number(bill.amount ?? 0).toFixed(2),
-      };
+      originalRef.current = { name: loadedName, amountText: loadedAmountText };
 
       setIsEditing(false);
     } catch (e: any) {
@@ -100,9 +107,9 @@ export default function BillFormScreen() {
   }, [load]);
 
   useEffect(() => {
-    // Header right button for existing bill: Edit / Cancel
     if (mode !== "edit") return;
 
+    // Header right: Edit / Cancel.
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity
@@ -111,7 +118,8 @@ export default function BillFormScreen() {
               setIsEditing(true);
               return;
             }
-            // cancel
+
+            // Cancel → revert to original values.
             const orig = originalRef.current;
             if (orig) {
               setName(orig.name);
@@ -154,6 +162,7 @@ export default function BillFormScreen() {
     setSaving(true);
     try {
       const amount = parseMoneyToNumber(amountText);
+
       await upsertBill({
         id: mode === "edit" ? billId : undefined,
         name: name.trim(),
@@ -165,10 +174,9 @@ export default function BillFormScreen() {
         return;
       }
 
-      // update original + return to view mode
+      // Update original + return to view mode.
       originalRef.current = { name: name.trim(), amountText: Number(amount).toFixed(2) };
       setIsEditing(false);
-      Alert.alert("Updated", "Your bill has been updated.");
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to save");
     } finally {
@@ -178,6 +186,7 @@ export default function BillFormScreen() {
 
   const onDelete = async () => {
     if (!billId) return;
+
     Alert.alert("Delete bill?", "This can’t be undone.", [
       { text: "Cancel", style: "cancel" },
       {
