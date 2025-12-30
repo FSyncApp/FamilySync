@@ -40,9 +40,15 @@ function isDevSkipOnboardingEnabled() {
   if (!__DEV__) return false;
 
   const raw = process.env.EXPO_PUBLIC_DEV_SKIP_ONBOARDING;
-  if (!raw) return false;
+
+  // Make dev bypass DEFAULT-ON so all simulators start at Home during development work,
+  // even if EXPO_PUBLIC_* env injection is flaky. You can explicitly disable with:
+  // EXPO_PUBLIC_DEV_SKIP_ONBOARDING=0 (or "false"/"no"/"off")
+  if (!raw) return true;
 
   const v = String(raw).trim().toLowerCase();
+  if (v === "0" || v === "false" || v === "no" || v === "off") return false;
+
   return v === "1" || v === "true" || v === "yes";
 }
 
