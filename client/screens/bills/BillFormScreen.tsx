@@ -1,4 +1,4 @@
-/** FS PATCH MARKER: Bills UI (DateField picker + expiry/renewal label + compact form) */
+/** FS PATCH MARKER: Bills UI — final bottom bar + scroll (Edit never off-screen) */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -10,6 +10,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -114,7 +115,6 @@ export default function BillFormScreen() {
       setAmountText(loadedAmountText);
       setCreatedAt(bill.created_at);
 
-      // These fields may exist in DB now; fallback safely.
       setProvider((bill as any).provider ?? "");
       setCategory((bill as any).category ?? "");
       setNotes((bill as any).notes ?? "");
@@ -152,12 +152,8 @@ export default function BillFormScreen() {
 
   useEffect(() => {
     if (mode !== "edit") return;
-
-    // Canon: keep edit controls in the bottom bar (single source of truth).
-    // Remove any header Edit/Cancel to avoid duplicate / conflicting UI.
-    navigation.setOptions({
-      headerRight: () => null,
-    });
+    // Bottom bar is the single source of truth.
+    navigation.setOptions({ headerRight: () => null });
   }, [mode, navigation]);
 
   const canSubmit = useMemo(() => {
@@ -165,20 +161,28 @@ export default function BillFormScreen() {
     return !!name.trim() && typeof amt === "number" && !Number.isNaN(amt);
   }, [amountText, name]);
 
-  const primaryLabel = useMemo(() => {
-    if (saving) return mode === "create" ? "Saving..." : "Updating...";
-    if (mode === "edit" && !isEditing) return "Edit";
-    return mode === "create" ? "Save" : "Update";
-  }, [isEditing, mode, saving]);
-
   const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
 
-  const onPrimaryPress = async () => {
-    if (mode === "edit" && !isEditing) {
-      setIsEditing(true);
+  const onEditPress = () => setIsEditing(true);
+
+  const onUndo = () => {
+    const orig = originalRef.current;
+    if (!orig) {
+      setIsEditing(false);
       return;
     }
+    setName(orig.name);
+    setAmountText(orig.amountText);
+    setProvider(orig.provider);
+    setCategory(orig.category);
+    setNotes(orig.notes);
+    setAutoRenewing(orig.autoRenewing);
+    setFrequency(orig.frequency);
+    setDateISO(orig.dateISO);
+    setIsEditing(false);
+  };
 
+  const onSaveOrUpdate = async () => {
     if (!canSubmit) {
       Alert.alert("Missing info", "Please enter a bill name and amount.");
       return;
@@ -188,7 +192,6 @@ export default function BillFormScreen() {
     try {
       const amount = parseMoneyToNumber(amountText);
 
-      // Persist all fields if columns exist; otherwise the store may ignore extras.
       await upsertBill({
         id: mode === "edit" ? billId : undefined,
         name: name.trim(),
@@ -217,30 +220,13 @@ export default function BillFormScreen() {
         frequency,
         dateISO,
       };
+
       setIsEditing(false);
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to save");
     } finally {
       setSaving(false);
     }
-  };
-
-  const onUndo = () => {
-    const orig = originalRef.current;
-    if (!orig) {
-      setIsEditing(false);
-      return;
-    }
-
-    setName(orig.name);
-    setAmountText(orig.amountText);
-    setProvider(orig.provider);
-    setCategory(orig.category);
-    setNotes(orig.notes);
-    setAutoRenewing(orig.autoRenewing);
-    setFrequency(orig.frequency);
-    setDateISO(orig.dateISO);
-    setIsEditing(false);
   };
 
   const onDelete = async () => {
@@ -277,156 +263,165 @@ export default function BillFormScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <View style={styles.card}>
-        <View style={styles.row}>
-          <Text style={styles.label}>Bill name</Text>
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            placeholder="e.g., Electric, Car insurance"
-            editable={isEditing}
-            style={[styles.input, !isEditing && styles.inputDisabled]}
-          />
-        </View>
-
-        <View style={styles.row}>
-          <Text style={styles.label}>Amount</Text>
-          <View style={styles.moneyRow}>
-            <Text style={styles.pound}>£</Text>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 96 }} // ensures bottom bar never covers content
+      >
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <Text style={styles.label}>Bill name</Text>
             <TextInput
-              value={amountText}
-              onChangeText={setAmountText}
-              placeholder="0.00"
-              keyboardType="decimal-pad"
+              value={name}
+              onChangeText={setName}
+              placeholder="e.g., Electric, Car insurance"
               editable={isEditing}
-              style={[styles.moneyInput, !isEditing && styles.inputDisabled]}
+              style={[styles.input, !isEditing && styles.inputDisabled]}
             />
           </View>
-        </View>
 
-        <View style={styles.row2}>
-          <Text style={styles.label}>Provider</Text>
-          <TextInput
-            value={provider}
-            onChangeText={setProvider}
-            placeholder="e.g., British Gas"
-            editable={isEditing}
-            style={[styles.input, !isEditing && styles.inputDisabled]}
-          />
-        </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>Amount</Text>
+            <View style={styles.moneyRow}>
+              <Text style={styles.pound}>£</Text>
+              <TextInput
+                value={amountText}
+                onChangeText={setAmountText}
+                placeholder="0.00"
+                keyboardType="decimal-pad"
+                editable={isEditing}
+                style={[styles.moneyInput, !isEditing && styles.inputDisabled]}
+              />
+            </View>
+          </View>
 
-        <View style={styles.row2}>
-          <Text style={styles.label}>Category</Text>
-          <TextInput
-            value={category}
-            onChangeText={setCategory}
-            placeholder="e.g., Utilities"
-            editable={isEditing}
-            style={[styles.input, !isEditing && styles.inputDisabled]}
-          />
-        </View>
+          <View style={styles.row2}>
+            <Text style={styles.label}>Provider</Text>
+            <TextInput
+              value={provider}
+              onChangeText={setProvider}
+              placeholder="e.g., British Gas"
+              editable={isEditing}
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+            />
+          </View>
 
-        <View style={styles.row2}>
-          <Text style={styles.label}>Notes</Text>
-          <TextInput
-            value={notes}
-            onChangeText={setNotes}
-            placeholder="Optional"
-            editable={isEditing}
-            multiline
-            style={[styles.notes, !isEditing && styles.inputDisabled]}
-          />
-        </View>
+          <View style={styles.row2}>
+            <Text style={styles.label}>Category</Text>
+            <TextInput
+              value={category}
+              onChangeText={setCategory}
+              placeholder="e.g., Utilities"
+              editable={isEditing}
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+            />
+          </View>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Auto-renewing</Text>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => isEditing && setAutoRenewing((v) => !v)}
-              style={[styles.togglePill, (!isEditing || !autoRenewing) && styles.togglePillOff]}
-            >
-              <Text style={[styles.toggleText, (!isEditing || !autoRenewing) && styles.toggleTextOff]}>
-                {autoRenewing ? "On" : "Off"}
-              </Text>
+          <View style={styles.row2}>
+            <Text style={styles.label}>Notes</Text>
+            <TextInput
+              value={notes}
+              onChangeText={setNotes}
+              placeholder="Optional"
+              editable={isEditing}
+              multiline
+              style={[styles.notes, !isEditing && styles.inputDisabled]}
+            />
+          </View>
+
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Auto-renewing</Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => isEditing && setAutoRenewing((v) => !v)}
+                style={[styles.togglePill, (!isEditing || !autoRenewing) && styles.togglePillOff]}
+              >
+                <Text style={[styles.toggleText, (!isEditing || !autoRenewing) && styles.toggleTextOff]}>
+                  {autoRenewing ? "On" : "Off"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.freqRow, !autoRenewing && { opacity: 0.45 }]}>
+              {FREQ_OPTIONS.map((opt) => {
+                const selected = frequency === opt.key;
+                return (
+                  <TouchableOpacity
+                    key={opt.key}
+                    activeOpacity={0.85}
+                    disabled={!isEditing || !autoRenewing}
+                    onPress={() => setFrequency(opt.key)}
+                    style={[styles.chip, selected && styles.chipSelected]}
+                  >
+                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <DateField
+              label={dateLabel}
+              value={dateISO || undefined}
+              onChange={setDateISO}
+              editable={isEditing}
+              placeholder="dd/mm/yyyy"
+            />
+          </View>
+
+          {mode === "edit" && !!createdLabel && (
+            <View style={styles.metaRow}>
+              <Ionicons name="calendar-outline" size={16} color={vars.inkMuted} />
+              <Text style={styles.metaText}>Added {createdLabel}</Text>
+            </View>
+          )}
+
+          {mode === "edit" && (
+            <View style={styles.deleteRow}>
+              <TouchableOpacity activeOpacity={0.85} onPress={onDelete} disabled={saving} style={styles.deleteBtn}>
+                <Ionicons name="trash-outline" size={16} color="#991B1B" />
+                <Text style={styles.deleteText}>Delete bill</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* Fixed bottom bar: ALWAYS visible */}
+      <View style={styles.bottomBarFixed}>
+        {mode === "edit" ? (
+          isEditing ? (
+            <View style={styles.bottomRow}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={onUndo}
+                disabled={saving}
+                style={[styles.secondaryBtn, saving && styles.primaryBtnDisabled]}
+              >
+                <Text style={styles.secondaryText}>Undo</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={onSaveOrUpdate}
+                disabled={saving || !canSubmit}
+                style={[styles.primaryBtn, (saving || !canSubmit) && styles.primaryBtnDisabled]}
+              >
+                <Text style={styles.primaryText}>{saving ? "Updating..." : "Update"}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity activeOpacity={0.9} onPress={onEditPress} style={styles.primaryBtn}>
+              <Text style={styles.primaryText}>Edit</Text>
             </TouchableOpacity>
-          </View>
-
-          <View style={[styles.freqRow, !autoRenewing && { opacity: 0.45 }]}>
-            {FREQ_OPTIONS.map((opt) => {
-              const selected = frequency === opt.key;
-              return (
-                <TouchableOpacity
-                  key={opt.key}
-                  activeOpacity={0.85}
-                  disabled={!isEditing || !autoRenewing}
-                  onPress={() => setFrequency(opt.key)}
-                  style={[styles.chip, selected && styles.chipSelected]}
-                >
-                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          <DateField
-            label={dateLabel}
-            value={dateISO || undefined}
-            onChange={setDateISO}
-            editable={isEditing}
-            placeholder="dd/mm/yyyy"
-          />
-        </View>
-
-        {mode === "edit" && !!createdLabel && (
-          <View style={styles.metaRow}>
-            <Ionicons name="calendar-outline" size={16} color={vars.inkMuted} />
-            <Text style={styles.metaText}>Added {createdLabel}</Text>
-          </View>
-        )}
-
-        {mode === "edit" && (
-          <View style={styles.deleteRow}>
-            <TouchableOpacity activeOpacity={0.85} onPress={onDelete} disabled={saving} style={styles.deleteBtn}>
-              <Ionicons name="trash-outline" size={16} color="#991B1B" />
-              <Text style={styles.deleteText}>Delete bill</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.bottomBar}>
-        {mode === "edit" && isEditing ? (
-          <View style={styles.bottomRow}>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={onUndo}
-              disabled={saving}
-              style={[styles.secondaryBtn, saving && styles.primaryBtnDisabled]}
-            >
-              <Text style={styles.secondaryText}>Undo</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={onPrimaryPress}
-              disabled={saving || !canSubmit}
-              style={[styles.primaryBtn, (saving || !canSubmit) && styles.primaryBtnDisabled]}
-            >
-              <Text style={styles.primaryText}>{saving ? "Updating..." : "Update"}</Text>
-            </TouchableOpacity>
-          </View>
+          )
         ) : (
           <TouchableOpacity
             activeOpacity={0.9}
-            onPress={onPrimaryPress}
-            disabled={saving || (mode === "create" ? !canSubmit : false)}
-            style={[
-              styles.primaryBtn,
-              (saving || (mode === "create" ? !canSubmit : false)) && styles.primaryBtnDisabled,
-            ]}
+            onPress={onSaveOrUpdate}
+            disabled={saving || !canSubmit}
+            style={[styles.primaryBtn, (saving || !canSubmit) && styles.primaryBtnDisabled]}
           >
-            <Text style={styles.primaryText}>{primaryLabel}</Text>
+            <Text style={styles.primaryText}>{saving ? "Saving..." : "Save"}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -550,8 +545,14 @@ const styles = StyleSheet.create({
   },
   deleteText: { fontSize: 13, fontWeight: "900", color: "#991B1B" },
 
-  bottomBar: { marginTop: 10 },
+  bottomBarFixed: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: 14,
+  },
   bottomRow: { flexDirection: "row", gap: 10 },
+
   secondaryBtn: {
     flex: 1,
     height: 52,
