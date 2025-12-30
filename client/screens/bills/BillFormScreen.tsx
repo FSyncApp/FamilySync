@@ -1,4 +1,4 @@
-/** FS PATCH MARKER: Bills UI — final bottom bar + scroll (Edit never off-screen) */
+/** FS PATCH MARKER: Bills UI — header delete + pinned bottom bar + scroll */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -57,7 +57,6 @@ export default function BillFormScreen() {
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
 
-  // Existing bills open read-only until Edit.
   const [isEditing, setIsEditing] = useState(mode === "create");
 
   const [createdAt, setCreatedAt] = useState<string | undefined>(undefined);
@@ -86,9 +85,47 @@ export default function BillFormScreen() {
 
   const title = useMemo(() => (mode === "create" ? "Add bill" : "Bill"), [mode]);
 
+  const onDelete = useCallback(async () => {
+    if (!billId) return;
+    Alert.alert("Delete bill?", "This can’t be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            setSaving(true);
+            await deleteBill(billId);
+            navigation.goBack();
+          } catch (e: any) {
+            Alert.alert("Error", e?.message ?? "Failed to delete");
+          } finally {
+            setSaving(false);
+          }
+        },
+      },
+    ]);
+  }, [billId, navigation]);
+
   useEffect(() => {
-    navigation.setOptions({ title });
-  }, [navigation, title]);
+    // Header: title always; delete icon only on existing bills.
+    navigation.setOptions({
+      title,
+      headerRight:
+        mode === "edit"
+          ? () => (
+              <TouchableOpacity
+                onPress={onDelete}
+                disabled={saving}
+                style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: saving ? 0.5 : 1 }}
+                accessibilityLabel="Delete bill"
+              >
+                <Ionicons name="trash-outline" size={20} color="#991B1B" />
+              </TouchableOpacity>
+            )
+          : () => null,
+    });
+  }, [mode, navigation, onDelete, saving, title]);
 
   const load = useCallback(async () => {
     if (mode !== "edit") return;
@@ -149,12 +186,6 @@ export default function BillFormScreen() {
   useEffect(() => {
     load();
   }, [load]);
-
-  useEffect(() => {
-    if (mode !== "edit") return;
-    // Bottom bar is the single source of truth.
-    navigation.setOptions({ headerRight: () => null });
-  }, [mode, navigation]);
 
   const canSubmit = useMemo(() => {
     const amt = parseMoneyToNumber(amountText);
@@ -229,28 +260,6 @@ export default function BillFormScreen() {
     }
   };
 
-  const onDelete = async () => {
-    if (!billId) return;
-    Alert.alert("Delete bill?", "This can’t be undone.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            setSaving(true);
-            await deleteBill(billId);
-            navigation.goBack();
-          } catch (e: any) {
-            Alert.alert("Error", e?.message ?? "Failed to delete");
-          } finally {
-            setSaving(false);
-          }
-        },
-      },
-    ]);
-  };
-
   if (loading) {
     return (
       <View style={[styles.screen, styles.center]}>
@@ -263,10 +272,7 @@ export default function BillFormScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 96 }} // ensures bottom bar never covers content
-      >
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 96 }}>
         <View style={styles.card}>
           <View style={styles.row}>
             <Text style={styles.label}>Bill name</Text>
@@ -374,19 +380,9 @@ export default function BillFormScreen() {
               <Text style={styles.metaText}>Added {createdLabel}</Text>
             </View>
           )}
-
-          {mode === "edit" && (
-            <View style={styles.deleteRow}>
-              <TouchableOpacity activeOpacity={0.85} onPress={onDelete} disabled={saving} style={styles.deleteBtn}>
-                <Ionicons name="trash-outline" size={16} color="#991B1B" />
-                <Text style={styles.deleteText}>Delete bill</Text>
-              </TouchableOpacity>
-            </View>
-          )}
         </View>
       </ScrollView>
 
-      {/* Fixed bottom bar: ALWAYS visible */}
       <View style={styles.bottomBarFixed}>
         {mode === "edit" ? (
           isEditing ? (
@@ -530,20 +526,6 @@ const styles = StyleSheet.create({
 
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 2 },
   metaText: { fontSize: 12, fontWeight: "700", color: vars.inkMuted },
-
-  deleteRow: { paddingTop: 8 },
-  deleteBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    borderWidth: 1,
-    borderColor: "#FECACA",
-    backgroundColor: "#FEF2F2",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-  },
-  deleteText: { fontSize: 13, fontWeight: "900", color: "#991B1B" },
 
   bottomBarFixed: {
     position: "absolute",
