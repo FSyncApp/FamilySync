@@ -1,4 +1,4 @@
-/** FS PATCH MARKER: Bills UI restore (recurring layout UI-only) */
+/** FS PATCH MARKER: Bills UI (DateField picker + expiry/renewal label + compact form) */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -17,6 +17,7 @@ import type { RouteProp } from "@react-navigation/native";
 
 import type { BillsStackParamList } from "../../navigation/BillsStack";
 import { deleteBill, getBillById, upsertBill } from "../../data/billsStore";
+import DateField from "../../components/DateField";
 
 type R = RouteProp<BillsStackParamList, "BillForm">;
 
@@ -59,7 +60,7 @@ export default function BillFormScreen() {
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
 
-  // existing bills open read-only until Edit
+  // Existing bills open read-only until Edit.
   const [isEditing, setIsEditing] = useState(mode === "create");
 
   const [createdAt, setCreatedAt] = useState<string | undefined>(undefined);
@@ -67,7 +68,7 @@ export default function BillFormScreen() {
   const [name, setName] = useState("");
   const [amountText, setAmountText] = useState("");
 
-  // --- UI-only fields (not persisted yet) ---
+  // UI-only fields (not persisted yet)
   const [provider, setProvider] = useState("");
   const [category, setCategory] = useState("");
   const [notes, setNotes] = useState("");
@@ -75,8 +76,8 @@ export default function BillFormScreen() {
   const [autoRenewing, setAutoRenewing] = useState(false);
   const [frequency, setFrequency] = useState<Frequency>("monthly");
 
-  // Single date field that can be used as either Expiry date (auto-renew off) or Renewal date (auto-renew on)
-  const [dateText, setDateText] = useState(""); // dd/mm/yyyy
+  // Date-only ISO: YYYY-MM-DD (Expiry when autoRenew off, Renewal when on)
+  const [dateISO, setDateISO] = useState("");
 
   const originalRef = useRef<{
     name: string;
@@ -86,7 +87,7 @@ export default function BillFormScreen() {
     notes: string;
     autoRenewing: boolean;
     frequency: Frequency;
-    dateText: string;
+    dateISO: string;
   } | null>(null);
 
   const title = useMemo(() => (mode === "create" ? "Add bill" : "Bill"), [mode]);
@@ -97,6 +98,7 @@ export default function BillFormScreen() {
 
   const load = useCallback(async () => {
     if (mode !== "edit" || !billId) return;
+
     setLoading(true);
     try {
       const bill = await getBillById(billId);
@@ -106,7 +108,6 @@ export default function BillFormScreen() {
         return;
       }
 
-      // Stable fields from DB:
       setName(bill.name ?? "");
       setAmountText(Number(bill.amount ?? 0).toFixed(2));
       setCreatedAt(bill.created_at);
@@ -117,7 +118,7 @@ export default function BillFormScreen() {
       setNotes("");
       setAutoRenewing(false);
       setFrequency("monthly");
-      setDateText("");
+      setDateISO("");
 
       originalRef.current = {
         name: bill.name ?? "",
@@ -127,7 +128,7 @@ export default function BillFormScreen() {
         notes: "",
         autoRenewing: false,
         frequency: "monthly",
-        dateText: "",
+        dateISO: "",
       };
 
       setIsEditing(false);
@@ -146,6 +147,7 @@ export default function BillFormScreen() {
   useEffect(() => {
     if (mode !== "edit") return;
 
+    // Header right: Edit / Cancel.
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity
@@ -154,7 +156,8 @@ export default function BillFormScreen() {
               setIsEditing(true);
               return;
             }
-            // cancel -> revert to original values (including UI-only)
+
+            // Cancel → revert to original values (including UI-only).
             const orig = originalRef.current;
             if (orig) {
               setName(orig.name);
@@ -164,15 +167,13 @@ export default function BillFormScreen() {
               setNotes(orig.notes);
               setAutoRenewing(orig.autoRenewing);
               setFrequency(orig.frequency);
-              setDateText(orig.dateText);
+              setDateISO(orig.dateISO);
             }
             setIsEditing(false);
           }}
           style={{ paddingHorizontal: 12, paddingVertical: 6 }}
         >
-          <Text style={{ fontSize: 14, fontWeight: "800", color: vars.ink }}>
-            {isEditing ? "Cancel" : "Edit"}
-          </Text>
+          <Text style={{ fontSize: 14, fontWeight: "800", color: vars.ink }}>{isEditing ? "Cancel" : "Edit"}</Text>
         </TouchableOpacity>
       ),
     });
@@ -206,8 +207,7 @@ export default function BillFormScreen() {
     try {
       const amount = parseMoneyToNumber(amountText);
 
-      // Schema-safe upsert — UI-only fields not sent yet.
-      // IMPORTANT: upsertBill now defaults auto_renew to false to avoid NOT NULL errors.
+      // DB-safe upsert: only stable fields for now.
       await upsertBill({
         id: mode === "edit" ? billId : undefined,
         name: name.trim(),
@@ -227,7 +227,7 @@ export default function BillFormScreen() {
         notes,
         autoRenewing,
         frequency,
-        dateText,
+        dateISO,
       };
       setIsEditing(false);
       Alert.alert("Updated", "Your bill has been updated.");
@@ -367,16 +367,13 @@ export default function BillFormScreen() {
             })}
           </View>
 
-          <View style={[styles.row, { marginBottom: 0 }]}>
-            <Text style={styles.label}>{dateLabel}</Text>
-            <TextInput
-              value={dateText}
-              onChangeText={setDateText}
-              placeholder="dd/mm/yyyy"
-              editable={isEditing}
-              style={[styles.input, !isEditing && styles.inputDisabled]}
-            />
-          </View>
+          <DateField
+            label={dateLabel}
+            value={dateISO || undefined}
+            onChange={setDateISO}
+            editable={isEditing}
+            placeholder="dd/mm/yyyy"
+          />
         </View>
 
         {mode === "edit" && !!createdLabel && (
