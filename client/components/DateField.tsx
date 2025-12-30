@@ -1,115 +1,87 @@
-import React, { useMemo, useState } from "react";
-import { Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import React, { useState } from "react";
+import {
+  Modal,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 
 /**
  * DateField
  * - Displays dd/mm/yyyy
  * - Stores date-only ISO: YYYY-MM-DD
- * - Opens a modal picker on iOS so it never renders "below" the screen
- * - Falls back to typed dd/mm/yyyy if DateTimePicker isn't installed
+ * - Opens a modal picker on iOS so it never renders below the screen
  */
 type Props = {
   label: string;
-  value?: string; // YYYY-MM-DD (preferred) or ISO string
+  value?: string; // YYYY-MM-DD
   onChange: (isoDate: string) => void;
   editable?: boolean;
-  placeholder?: string; // dd/mm/yyyy
+  placeholder?: string;
 };
 
 function toISODate(d: Date) {
-  const y = String(d.getFullYear());
+  const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function formatUK(value?: string) {
   if (!value) return "";
-  const iso = value.slice(0, 10);
-  const parts = iso.split("-");
-  if (parts.length !== 3) return "";
-  const [y, m, d] = parts;
+  const [y, m, d] = value.split("-");
   if (!y || !m || !d) return "";
   return `${d}/${m}/${y}`;
 }
 
-function parseUK(text: string) {
-  const m = text.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (!m) return null;
-  const dd = m[1].padStart(2, "0");
-  const mm = m[2].padStart(2, "0");
-  const yyyy = m[3];
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-export default function DateField({ label, value, onChange, editable = true, placeholder = "dd/mm/yyyy" }: Props) {
+export default function DateField({
+  label,
+  value,
+  onChange,
+  editable = true,
+  placeholder = "dd/mm/yyyy",
+}: Props) {
   const [open, setOpen] = useState(false);
   const [tempDate, setTempDate] = useState<Date>(() => {
     const d = value ? new Date(value) : new Date();
-    return Number.isNaN(d.getTime()) ? new Date() : d;
+    return isNaN(d.getTime()) ? new Date() : d;
   });
 
-  const DateTimePicker = useMemo(() => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const mod = require("@react-native-community/datetimepicker");
-      return mod.default ?? mod;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const display = formatUK(value);
-
-  if (!DateTimePicker) {
-    return (
-      <View style={s.wrap}>
-        <Text style={s.label}>{label}</Text>
-        <TextInput
-          value={display}
-          placeholder={placeholder}
-          editable={editable}
-          onChangeText={(t) => {
-            const iso = parseUK(t);
-            if (iso) onChange(iso);
-          }}
-          style={[s.input, !editable && s.disabled]}
-        />
-      </View>
-    );
-  }
-
   return (
-    <View style={s.wrap}>
-      <Text style={s.label}>{label}</Text>
+    <View style={styles.wrap}>
+      <Text style={styles.label}>{label}</Text>
 
       <TouchableOpacity
         activeOpacity={0.85}
+        disabled={!editable}
         onPress={() => {
-          if (!editable) return;
           const d = value ? new Date(value) : new Date();
-          setTempDate(Number.isNaN(d.getTime()) ? new Date() : d);
+          setTempDate(isNaN(d.getTime()) ? new Date() : d);
           setOpen(true);
         }}
-        style={[s.pill, !editable && s.disabled]}
+        style={[styles.field, !editable && styles.disabled]}
       >
-        <Text style={[s.pillText, !display && s.placeholder]}>{display || placeholder}</Text>
+        <Text style={[styles.text, !value && styles.placeholder]}>
+          {value ? formatUK(value) : placeholder}
+        </Text>
       </TouchableOpacity>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-        <TouchableOpacity activeOpacity={1} onPress={() => setOpen(false)} style={s.backdrop}>
-          <TouchableOpacity activeOpacity={1} onPress={() => {}} style={s.sheet}>
-            <View style={s.sheetHeader}>
-              <Text style={s.sheetTitle}>{label}</Text>
+      <Modal visible={open} transparent animationType="fade">
+        <TouchableOpacity style={styles.backdrop} onPress={() => setOpen(false)}>
+          <TouchableOpacity activeOpacity={1} style={styles.sheet}>
+            <View style={styles.header}>
+              <Text style={styles.headerText}>{label}</Text>
               <TouchableOpacity
-                activeOpacity={0.85}
                 onPress={() => {
                   onChange(toISODate(tempDate));
                   setOpen(false);
                 }}
-                style={s.doneBtn}
               >
-                <Text style={s.doneText}>Done</Text>
+                <Text style={styles.done}>Done</Text>
               </TouchableOpacity>
             </View>
 
@@ -117,10 +89,9 @@ export default function DateField({ label, value, onChange, editable = true, pla
               value={tempDate}
               mode="date"
               display={Platform.OS === "ios" ? "spinner" : "default"}
-              onChange={(_evt: any, selected?: Date) => {
-                if (!selected) return;
-                setTempDate(selected);
-                if (Platform.OS !== "ios") {
+              onChange={(_, selected) => {
+                if (selected) setTempDate(selected);
+                if (Platform.OS !== "ios" && selected) {
                   onChange(toISODate(selected));
                   setOpen(false);
                 }
@@ -133,64 +104,37 @@ export default function DateField({ label, value, onChange, editable = true, pla
   );
 }
 
-const vars = {
-  ink: "#111827",
-  inkMuted: "#6B7280",
-  border: "#E5E7EB",
-  bg: "#FFFFFF",
-  bgDisabled: "#F3F4F6",
-};
-
-const s = StyleSheet.create({
+const styles = StyleSheet.create({
   wrap: { marginBottom: 10 },
-  label: { fontSize: 13, fontWeight: "800", color: vars.ink, marginBottom: 6 },
+  label: { fontSize: 13, fontWeight: "800", marginBottom: 6 },
 
-  input: {
-    backgroundColor: vars.bg,
+  field: {
     borderWidth: 1,
-    borderColor: vars.border,
     borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    fontWeight: "700",
-    color: vars.ink,
+    padding: 12,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
   },
-
-  pill: {
-    backgroundColor: vars.bg,
-    borderWidth: 1,
-    borderColor: vars.border,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  pillText: { fontSize: 14, fontWeight: "700", color: vars.ink },
-  placeholder: { color: vars.inkMuted },
-  disabled: { opacity: 0.5, backgroundColor: vars.bgDisabled },
+  disabled: { opacity: 0.5, backgroundColor: "#F3F4F6" },
+  text: { fontSize: 14, fontWeight: "700" },
+  placeholder: { color: "#6B7280" },
 
   backdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.35)",
-    padding: 16,
     justifyContent: "flex-end",
+    padding: 16,
   },
   sheet: {
     backgroundColor: "#FFFFFF",
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: vars.border,
     padding: 12,
   },
-  sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
-  sheetTitle: { fontSize: 14, fontWeight: "900", color: vars.ink },
-  doneBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: vars.border,
-    backgroundColor: "#FFFFFF",
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 8,
   },
-  doneText: { fontSize: 13, fontWeight: "900", color: vars.ink },
+  headerText: { fontSize: 14, fontWeight: "900" },
+  done: { fontSize: 14, fontWeight: "900" },
 });
