@@ -28,6 +28,11 @@
     },
     "plugins": [
       "@react-native-community/datetimepicker"
-    ]
+    ],
+    "extra": {
+      "EXPO_PUBLIC_SUPABASE_URL": "https://lgpbgnyqzfechavgufnj.supabase.co",
+      "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxncGJnbnlxemZlY2hhdmd1Zm5qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY0ODMzNzIsImV4cCI6MjA4MjA1OTM3Mn0.9VULVuMXQKB64pViwe8vhtr-diJX6A42wUo4dS4TuZE",
+      "EXPO_PUBLIC_DEFAULT_FAMILY_ID": "6f821b72-1763-44ca-b1d3-90dc72790895"
+    }
   }
 }
