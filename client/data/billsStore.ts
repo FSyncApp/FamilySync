@@ -1,4 +1,4 @@
-/** FS PATCH MARKER: Bills v0 UX cleanup (store) */
+/** Bills store (Phase 2) */
 import { supabase } from "../lib/supabase";
 
 export type BillRow = {
@@ -7,6 +7,9 @@ export type BillRow = {
   user_id?: string | null;
   name: string;
   amount: number;
+  frequency?: string | null;
+  auto_renew?: boolean | null;
+  notes?: string | null;
   created_at?: string;
 };
 
@@ -20,7 +23,7 @@ export async function listBills(): Promise<BillRow[]> {
   const familyId = getDefaultFamilyId();
   const { data, error } = await supabase
     .from("bills")
-    .select("id,family_id,user_id,name,amount,created_at")
+    .select("id,family_id,user_id,name,amount,frequency,auto_renew,notes,created_at")
     .eq("family_id", familyId)
     .order("created_at", { ascending: false });
 
@@ -32,7 +35,7 @@ export async function getBillById(id: string): Promise<BillRow | null> {
   const familyId = getDefaultFamilyId();
   const { data, error } = await supabase
     .from("bills")
-    .select("id,family_id,user_id,name,amount,created_at")
+    .select("id,family_id,user_id,name,amount,frequency,auto_renew,notes,created_at")
     .eq("id", id)
     .eq("family_id", familyId)
     .maybeSingle();
@@ -46,6 +49,9 @@ export type UpsertBillInput = {
   name: string;
   amount?: number | null;
   amount_pence?: number | null; // allow older callers
+  frequency?: string | null;
+  auto_renew?: boolean | null;
+  notes?: string | null;
 };
 
 export async function upsertBill(input: UpsertBillInput): Promise<BillRow> {
@@ -56,7 +62,6 @@ export async function upsertBill(input: UpsertBillInput): Promise<BillRow> {
 
   let amount: number | null = typeof input.amount === "number" ? input.amount : null;
   if (amount === null && typeof input.amount_pence === "number") amount = input.amount_pence / 100;
-
   if (typeof amount !== "number" || Number.isNaN(amount)) throw new Error("Amount is required");
 
   const payload: any = {
@@ -64,6 +69,9 @@ export async function upsertBill(input: UpsertBillInput): Promise<BillRow> {
     family_id: familyId,
     name,
     amount,
+    frequency: input.frequency ?? null,
+    auto_renew: typeof input.auto_renew === "boolean" ? input.auto_renew : null,
+    notes: input.notes ?? null,
   };
 
   const { data, error } = await supabase.from("bills").upsert(payload).select("*").single();

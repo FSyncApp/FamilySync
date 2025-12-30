@@ -1,3 +1,4 @@
+/** FS PATCH MARKER: Bills UI restore (recurring layout UI-only) */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -29,12 +30,25 @@ function formatUKDateFromISO(iso?: string) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+function stripMoneyInput(input: string) {
+  // keep digits + dot only
+  return input.replace(/[^0-9.]/g, "");
+}
+
 function parseMoneyToNumber(input: string) {
-  // Accept: "12", "12.34", "£12.34"
-  const cleaned = input.replace(/[^0-9.]/g, "");
+  const cleaned = stripMoneyInput(input);
   if (!cleaned) return NaN;
   return Number(cleaned);
 }
+
+type Frequency = "weekly" | "monthly" | "quarterly" | "yearly";
+
+const FREQ_OPTIONS: { key: Frequency; label: string }[] = [
+  { key: "weekly", label: "Weekly" },
+  { key: "monthly", label: "Monthly" },
+  { key: "quarterly", label: "Quarterly" },
+  { key: "yearly", label: "Yearly" },
+];
 
 export default function BillFormScreen() {
   const navigation = useNavigation<any>();
@@ -46,52 +60,75 @@ export default function BillFormScreen() {
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
 
-  // Existing bills open read-only until Edit.
+  // existing bills open read-only until Edit
   const [isEditing, setIsEditing] = useState(mode === "create");
 
   const [createdAt, setCreatedAt] = useState<string | undefined>(undefined);
+
   const [name, setName] = useState("");
   const [amountText, setAmountText] = useState("");
 
-  const originalRef = useRef<{ name: string; amountText: string } | null>(null);
+  // --- Restored UI fields (UI-only for now) ---
+  const [provider, setProvider] = useState("");
+  const [category, setCategory] = useState("");
+  const [notes, setNotes] = useState("");
 
-  const title = useMemo(() => {
-    if (mode === "create") return "Add bill";
-    return "Bill";
-  }, [mode]);
+  const [autoRenewing, setAutoRenewing] = useState(false);
+  const [frequency, setFrequency] = useState<Frequency>("monthly");
+  const [renewalDateText, setRenewalDateText] = useState(""); // dd/mm/yyyy text for now
+
+  const originalRef = useRef<{
+    name: string;
+    amountText: string;
+    provider: string;
+    category: string;
+    notes: string;
+    autoRenewing: boolean;
+    frequency: Frequency;
+    renewalDateText: string;
+  } | null>(null);
+
+  const title = useMemo(() => (mode === "create" ? "Add bill" : "Bill"), [mode]);
 
   useEffect(() => {
     navigation.setOptions({ title });
   }, [navigation, title]);
 
   const load = useCallback(async () => {
-    if (mode !== "edit") return;
-
-    if (!billId) {
-      Alert.alert("Missing bill", "No bill was provided to open.");
-      navigation.goBack();
-      return;
-    }
-
+    if (mode !== "edit" || !billId) return;
     setLoading(true);
     try {
       const bill = await getBillById(billId);
-
       if (!bill) {
         Alert.alert("Not found", "That bill no longer exists.");
         navigation.goBack();
         return;
       }
 
-      // v0 fields only: name, amount, created_at
-      const loadedName = bill.name ?? "";
-      const loadedAmountText = Number(bill.amount ?? 0).toFixed(2);
-
-      setName(loadedName);
-      setAmountText(loadedAmountText);
+      // Only stable v0 fields from DB:
+      setName(bill.name ?? "");
+      setAmountText(Number(bill.amount ?? 0).toFixed(2));
       setCreatedAt(bill.created_at);
 
-      originalRef.current = { name: loadedName, amountText: loadedAmountText };
+      // UI-only fields default (until schema supports)
+      setProvider("");
+      setCategory("");
+      setNotes("");
+
+      setAutoRenewing(false);
+      setFrequency("monthly");
+      setRenewalDateText("");
+
+      originalRef.current = {
+        name: bill.name ?? "",
+        amountText: Number(bill.amount ?? 0).toFixed(2),
+        provider: "",
+        category: "",
+        notes: "",
+        autoRenewing: false,
+        frequency: "monthly",
+        renewalDateText: "",
+      };
 
       setIsEditing(false);
     } catch (e: any) {
@@ -109,7 +146,6 @@ export default function BillFormScreen() {
   useEffect(() => {
     if (mode !== "edit") return;
 
-    // Header right: Edit / Cancel.
     navigation.setOptions({
       headerRight: () => (
         <TouchableOpacity
@@ -118,12 +154,17 @@ export default function BillFormScreen() {
               setIsEditing(true);
               return;
             }
-
-            // Cancel → revert to original values.
+            // cancel -> revert to original values (including UI-only)
             const orig = originalRef.current;
             if (orig) {
               setName(orig.name);
               setAmountText(orig.amountText);
+              setProvider(orig.provider);
+              setCategory(orig.category);
+              setNotes(orig.notes);
+              setAutoRenewing(orig.autoRenewing);
+              setFrequency(orig.frequency);
+              setRenewalDateText(orig.renewalDateText);
             }
             setIsEditing(false);
           }}
@@ -163,6 +204,7 @@ export default function BillFormScreen() {
     try {
       const amount = parseMoneyToNumber(amountText);
 
+      // IMPORTANT: schema-safe upsert (Phase 2 v0) — we do NOT send recurring/UI-only fields yet
       await upsertBill({
         id: mode === "edit" ? billId : undefined,
         name: name.trim(),
@@ -174,9 +216,19 @@ export default function BillFormScreen() {
         return;
       }
 
-      // Update original + return to view mode.
-      originalRef.current = { name: name.trim(), amountText: Number(amount).toFixed(2) };
+      // Update originals + return to view mode (UI-only fields remain UI-only for now)
+      originalRef.current = {
+        name: name.trim(),
+        amountText: Number(amount).toFixed(2),
+        provider,
+        category,
+        notes,
+        autoRenewing,
+        frequency,
+        renewalDateText,
+      };
       setIsEditing(false);
+      Alert.alert("Updated", "Your bill has been updated.");
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to save");
     } finally {
@@ -186,7 +238,6 @@ export default function BillFormScreen() {
 
   const onDelete = async () => {
     if (!billId) return;
-
     Alert.alert("Delete bill?", "This can’t be undone.", [
       { text: "Cancel", style: "cancel" },
       {
@@ -233,15 +284,98 @@ export default function BillFormScreen() {
 
         <View style={styles.row}>
           <Text style={styles.label}>Amount</Text>
-          <TextInput
-            value={amountText}
-            onChangeText={setAmountText}
-            placeholder="0.00"
-            keyboardType="decimal-pad"
-            editable={isEditing}
-            style={[styles.input, !isEditing && styles.inputDisabled]}
-          />
+          <View style={[styles.moneyWrap, (!isEditing || saving) && { opacity: 0.98 }]}>
+            <Text style={styles.moneyPrefix}>£</Text>
+            <TextInput
+              value={amountText}
+              onChangeText={(t) => setAmountText(stripMoneyInput(t))}
+              placeholder="0.00"
+              keyboardType="decimal-pad"
+              editable={isEditing}
+              style={[styles.moneyInput, !isEditing && styles.inputDisabled]}
+            />
+          </View>
           <Text style={styles.helper}>Enter pounds (e.g. 12.34)</Text>
+        </View>
+
+        <View style={styles.twoCol}>
+          <View style={[styles.col, { marginRight: 8 }]}>
+            <Text style={styles.label}>Category</Text>
+            <TextInput
+              value={category}
+              onChangeText={setCategory}
+              placeholder="e.g., Utilities"
+              editable={isEditing}
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+            />
+          </View>
+
+          <View style={[styles.col, { marginLeft: 8 }]}>
+            <Text style={styles.label}>Provider</Text>
+            <TextInput
+              value={provider}
+              onChangeText={setProvider}
+              placeholder="e.g., British Gas"
+              editable={isEditing}
+              style={[styles.input, !isEditing && styles.inputDisabled]}
+            />
+          </View>
+        </View>
+
+        <View style={[styles.row, { marginBottom: 10 }]}>
+          <Text style={styles.label}>Notes</Text>
+          <TextInput
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="Add any notes…"
+            editable={isEditing}
+            multiline
+            style={[styles.input, styles.notesInput, !isEditing && styles.inputDisabled]}
+          />
+        </View>
+
+        {/* Restored section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Auto-renewing</Text>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => isEditing && setAutoRenewing((v) => !v)}
+              style={[styles.togglePill, (!isEditing || !autoRenewing) && styles.togglePillOff]}
+            >
+              <Text style={[styles.toggleText, (!isEditing || !autoRenewing) && styles.toggleTextOff]}>
+                {autoRenewing ? "On" : "Off"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={[styles.freqRow, !autoRenewing && { opacity: 0.45 }]}>
+            {FREQ_OPTIONS.map((opt) => {
+              const selected = frequency === opt.key;
+              return (
+                <TouchableOpacity
+                  key={opt.key}
+                  activeOpacity={0.85}
+                  disabled={!isEditing || !autoRenewing}
+                  onPress={() => setFrequency(opt.key)}
+                  style={[styles.chip, selected && styles.chipSelected]}
+                >
+                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          <View style={[styles.row, { marginBottom: 0 }, !autoRenewing && { opacity: 0.45 }]}>
+            <Text style={styles.label}>Renewal date</Text>
+            <TextInput
+              value={renewalDateText}
+              onChangeText={setRenewalDateText}
+              placeholder="dd/mm/yyyy"
+              editable={isEditing && autoRenewing}
+              style={[styles.input, (!isEditing || !autoRenewing) && styles.inputDisabled]}
+            />
+          </View>
         </View>
 
         {mode === "edit" && !!createdLabel && (
@@ -288,7 +422,7 @@ const vars = {
 };
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: vars.bg, padding: 16 },
+  screen: { flex: 1, backgroundColor: vars.bg, padding: 14 },
   center: { alignItems: "center", justifyContent: "center" },
 
   card: {
@@ -296,14 +430,14 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: vars.border,
-    padding: 14,
+    padding: 12,
     shadowColor: vars.shadow,
     shadowOpacity: 1,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 10 },
   },
 
-  row: { marginBottom: 12 },
+  row: { marginBottom: 10 },
   label: { fontSize: 13, fontWeight: "800", color: vars.ink, marginBottom: 6 },
   input: {
     backgroundColor: "#FFFFFF",
@@ -311,13 +445,69 @@ const styles = StyleSheet.create({
     borderColor: vars.border,
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     fontSize: 14,
     fontWeight: "700",
     color: vars.ink,
   },
   inputDisabled: { backgroundColor: "#F3F4F6", color: vars.inkMuted },
-  helper: { marginTop: 6, fontSize: 12, fontWeight: "600", color: vars.inkMuted },
+  helper: { marginTop: 5, fontSize: 12, fontWeight: "600", color: vars.inkMuted },
+
+  moneyWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: vars.border,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 2,
+  },
+  moneyPrefix: { fontSize: 14, fontWeight: "900", color: vars.ink, marginRight: 6 },
+  moneyInput: {
+    flex: 1,
+    paddingVertical: 8,
+    fontSize: 14,
+    fontWeight: "700",
+    color: vars.ink,
+  },
+
+  twoCol: { flexDirection: "row", marginBottom: 10 },
+  col: { flex: 1 },
+
+  notesInput: { minHeight: 62, textAlignVertical: "top" },
+
+  section: {
+    marginTop: 2,
+    marginBottom: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: vars.border,
+  },
+  sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sectionTitle: { fontSize: 13, fontWeight: "900", color: vars.ink },
+  togglePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: vars.ink,
+  },
+  togglePillOff: { backgroundColor: "#E5E7EB" },
+  toggleText: { fontSize: 12, fontWeight: "900", color: "#FFFFFF" },
+  toggleTextOff: { color: vars.inkMuted },
+
+  freqRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10, marginBottom: 10 },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: vars.border,
+    backgroundColor: "#FFFFFF",
+  },
+  chipSelected: { backgroundColor: vars.ink, borderColor: vars.ink },
+  chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
+  chipTextSelected: { color: "#FFFFFF" },
 
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 },
   metaText: { fontSize: 12, fontWeight: "700", color: vars.inkMuted },
@@ -336,7 +526,7 @@ const styles = StyleSheet.create({
   },
   deleteText: { fontSize: 13, fontWeight: "900", color: "#991B1B" },
 
-  bottomBar: { marginTop: 12 },
+  bottomBar: { marginTop: 10 },
   primaryBtn: {
     height: 52,
     borderRadius: 16,

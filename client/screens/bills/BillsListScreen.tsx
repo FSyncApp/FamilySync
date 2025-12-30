@@ -1,5 +1,4 @@
-/** FS PATCH MARKER: Bills v0 UX cleanup (list) */
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useLayoutEffect, useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList, RefreshControl } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
@@ -11,7 +10,8 @@ import { listBills, type BillRow } from "../../data/billsStore";
 type Nav = NativeStackNavigationProp<BillsStackParamList>;
 
 function formatGBP(amount: number) {
-  const v = Math.round(amount * 100) / 100;
+  const n = Number.isFinite(amount) ? amount : 0;
+  const v = Math.round(n * 100) / 100;
   return `£${v.toFixed(2)}`;
 }
 
@@ -32,13 +32,33 @@ export default function BillsListScreen() {
   const [bills, setBills] = useState<BillRow[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const onAdd = useCallback(() => navigation.navigate("BillForm", { mode: "create" }), [navigation]);
+
+  // Use the native stack header (compact) instead of an in-screen header.
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: "Bills",
+      headerRight: () => (
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={onAdd}
+          activeOpacity={0.85}
+          style={{ paddingHorizontal: 12, paddingVertical: 6 }}
+        >
+          <Ionicons name="add" size={22} color={vars.ink} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation, onAdd]);
+
   const load = useCallback(async () => {
     setError(null);
     try {
       const data = await listBills();
-      setBills(data);
+      setBills(Array.isArray(data) ? data : []);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load bills");
+      setBills([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -57,33 +77,31 @@ export default function BillsListScreen() {
     load();
   }, [load]);
 
-  const onAdd = () => navigation.navigate("BillForm", { mode: "create" });
-
   const renderItem = ({ item, index }: { item: BillRow; index: number }) => {
-    const date = formatUKDateFromISO(item.created_at);
+    const safeName = String(item?.name ?? "").trim() || "Untitled bill";
+    const safeAmount = Number(item?.amount ?? 0);
+    const created = formatUKDateFromISO(item?.created_at);
+
     return (
       <TouchableOpacity
-        activeOpacity={0.8}
+        activeOpacity={0.85}
         style={[styles.row, index === 0 && styles.rowFirst]}
         onPress={() => navigation.navigate("BillForm", { mode: "edit", billId: item.id })}
       >
-        <View style={styles.rowIcon}>
-          <Ionicons name="receipt-outline" size={18} color={vars.inkMuted} />
-        </View>
-
         <View style={styles.rowText}>
           <Text style={styles.rowTitle} numberOfLines={1}>
-            {item.name}
+            {safeName}
           </Text>
-          {!!date && (
+
+          {!!created && (
             <Text style={styles.rowSub} numberOfLines={1}>
-              Added {date}
+              {created}
             </Text>
           )}
         </View>
 
         <View style={styles.rowRight}>
-          <Text style={styles.amount}>{formatGBP(item.amount)}</Text>
+          <Text style={styles.amount}>{formatGBP(safeAmount)}</Text>
           <Ionicons name="chevron-forward" size={16} color={vars.inkMuted} />
         </View>
       </TouchableOpacity>
@@ -92,14 +110,6 @@ export default function BillsListScreen() {
 
   return (
     <View style={styles.screen}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Bills</Text>
-        <TouchableOpacity style={styles.addBtn} activeOpacity={0.85} onPress={onAdd}>
-          <Ionicons name="add" size={18} color={vars.ink} />
-          <Text style={styles.addText}>Add</Text>
-        </TouchableOpacity>
-      </View>
-
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator />
@@ -116,7 +126,7 @@ export default function BillsListScreen() {
             {bills.length === 0 ? (
               <View style={styles.empty}>
                 <Text style={styles.emptyTitle}>No bills yet</Text>
-                <Text style={styles.emptySub}>Add your first bill to start tracking renewals later.</Text>
+                <Text style={styles.emptySub}>Tap + to add your first bill.</Text>
               </View>
             ) : (
               <FlatList
@@ -144,20 +154,6 @@ const vars = {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vars.bg, padding: 16 },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
-  title: { fontSize: 22, fontWeight: "800", color: vars.ink },
-  addBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: vars.card,
-    borderWidth: 1,
-    borderColor: vars.border,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
-  },
-  addText: { fontSize: 14, fontWeight: "700", color: vars.ink },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
@@ -188,16 +184,16 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 15, fontWeight: "800", color: vars.ink },
   emptySub: { marginTop: 6, fontSize: 13, fontWeight: "600", color: vars.inkMuted, lineHeight: 18 },
 
+  // Compact rows
   row: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderTopWidth: 1,
     borderTopColor: vars.border,
   },
   rowFirst: { borderTopWidth: 0 },
-  rowIcon: { width: 26, alignItems: "center", marginRight: 10 },
   rowText: { flex: 1 },
   rowTitle: { fontSize: 14, lineHeight: 18, fontWeight: "800", color: vars.ink },
   rowSub: { marginTop: 2, fontSize: 12, lineHeight: 15, fontWeight: "700", color: vars.inkMuted },
