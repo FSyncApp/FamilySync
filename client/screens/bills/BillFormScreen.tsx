@@ -31,12 +31,8 @@ function formatUKDateFromISO(iso?: string) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
-function stripMoneyInput(input: string) {
-  return input.replace(/[^0-9.]/g, "");
-}
-
 function parseMoneyToNumber(input: string) {
-  const cleaned = stripMoneyInput(input);
+  const cleaned = input.replace(/[^0-9.]/g, "");
   if (!cleaned) return NaN;
   return Number(cleaned);
 }
@@ -68,16 +64,13 @@ export default function BillFormScreen() {
   const [name, setName] = useState("");
   const [amountText, setAmountText] = useState("");
 
-  // UI-only fields (not persisted yet)
   const [provider, setProvider] = useState("");
   const [category, setCategory] = useState("");
   const [notes, setNotes] = useState("");
 
   const [autoRenewing, setAutoRenewing] = useState(false);
   const [frequency, setFrequency] = useState<Frequency>("monthly");
-
-  // Date-only ISO: YYYY-MM-DD (Expiry when autoRenew off, Renewal when on)
-  const [dateISO, setDateISO] = useState("");
+  const [dateISO, setDateISO] = useState<string>("");
 
   const originalRef = useRef<{
     name: string;
@@ -97,7 +90,13 @@ export default function BillFormScreen() {
   }, [navigation, title]);
 
   const load = useCallback(async () => {
-    if (mode !== "edit" || !billId) return;
+    if (mode !== "edit") return;
+
+    if (!billId) {
+      Alert.alert("Missing bill", "No bill was provided to open.");
+      navigation.goBack();
+      return;
+    }
 
     setLoading(true);
     try {
@@ -108,27 +107,34 @@ export default function BillFormScreen() {
         return;
       }
 
-      setName(bill.name ?? "");
-      setAmountText(Number(bill.amount ?? 0).toFixed(2));
+      const loadedName = bill.name ?? "";
+      const loadedAmountText = Number(bill.amount ?? 0).toFixed(2);
+
+      setName(loadedName);
+      setAmountText(loadedAmountText);
       setCreatedAt(bill.created_at);
 
-      // UI-only defaults
-      setProvider("");
-      setCategory("");
-      setNotes("");
-      setAutoRenewing(false);
-      setFrequency("monthly");
-      setDateISO("");
+      // These fields may exist in DB now; fallback safely.
+      setProvider((bill as any).provider ?? "");
+      setCategory((bill as any).category ?? "");
+      setNotes((bill as any).notes ?? "");
+
+      const ar = Boolean((bill as any).auto_renew ?? false);
+      setAutoRenewing(ar);
+      setFrequency(((bill as any).frequency as Frequency) ?? "monthly");
+
+      const iso = (ar ? (bill as any).renewal_date : (bill as any).expiry_date) ?? "";
+      setDateISO(String(iso ?? ""));
 
       originalRef.current = {
-        name: bill.name ?? "",
-        amountText: Number(bill.amount ?? 0).toFixed(2),
-        provider: "",
-        category: "",
-        notes: "",
-        autoRenewing: false,
-        frequency: "monthly",
-        dateISO: "",
+        name: loadedName,
+        amountText: loadedAmountText,
+        provider: (bill as any).provider ?? "",
+        category: (bill as any).category ?? "",
+        notes: (bill as any).notes ?? "",
+        autoRenewing: ar,
+        frequency: (((bill as any).frequency as Frequency) ?? "monthly") as Frequency,
+        dateISO: String(iso ?? ""),
       };
 
       setIsEditing(false);
@@ -147,37 +153,12 @@ export default function BillFormScreen() {
   useEffect(() => {
     if (mode !== "edit") return;
 
-    // Header right: Edit / Cancel.
+    // Canon: keep edit controls in the bottom bar (single source of truth).
+    // Remove any header Edit/Cancel to avoid duplicate / conflicting UI.
     navigation.setOptions({
-      headerRight: () => (
-        <TouchableOpacity
-          onPress={() => {
-            if (!isEditing) {
-              setIsEditing(true);
-              return;
-            }
-
-            // Cancel → revert to original values (including UI-only).
-            const orig = originalRef.current;
-            if (orig) {
-              setName(orig.name);
-              setAmountText(orig.amountText);
-              setProvider(orig.provider);
-              setCategory(orig.category);
-              setNotes(orig.notes);
-              setAutoRenewing(orig.autoRenewing);
-              setFrequency(orig.frequency);
-              setDateISO(orig.dateISO);
-            }
-            setIsEditing(false);
-          }}
-          style={{ paddingHorizontal: 12, paddingVertical: 6 }}
-        >
-          <Text style={{ fontSize: 14, fontWeight: "800", color: vars.ink }}>{isEditing ? "Cancel" : "Edit"}</Text>
-        </TouchableOpacity>
-      ),
+      headerRight: () => null,
     });
-  }, [isEditing, mode, navigation]);
+  }, [mode, navigation]);
 
   const canSubmit = useMemo(() => {
     const amt = parseMoneyToNumber(amountText);
@@ -207,12 +188,19 @@ export default function BillFormScreen() {
     try {
       const amount = parseMoneyToNumber(amountText);
 
-      // DB-safe upsert: only stable fields for now.
+      // Persist all fields if columns exist; otherwise the store may ignore extras.
       await upsertBill({
         id: mode === "edit" ? billId : undefined,
         name: name.trim(),
         amount,
-      });
+        provider: provider.trim(),
+        category: category.trim(),
+        notes: notes.trim(),
+        auto_renew: autoRenewing,
+        frequency,
+        expiry_date: autoRenewing ? null : (dateISO || null),
+        renewal_date: autoRenewing ? (dateISO || null) : null,
+      } as any);
 
       if (mode === "create") {
         navigation.goBack();
@@ -230,12 +218,29 @@ export default function BillFormScreen() {
         dateISO,
       };
       setIsEditing(false);
-      Alert.alert("Updated", "Your bill has been updated.");
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to save");
     } finally {
       setSaving(false);
     }
+  };
+
+  const onUndo = () => {
+    const orig = originalRef.current;
+    if (!orig) {
+      setIsEditing(false);
+      return;
+    }
+
+    setName(orig.name);
+    setAmountText(orig.amountText);
+    setProvider(orig.provider);
+    setCategory(orig.category);
+    setNotes(orig.notes);
+    setAutoRenewing(orig.autoRenewing);
+    setFrequency(orig.frequency);
+    setDateISO(orig.dateISO);
+    setIsEditing(false);
   };
 
   const onDelete = async () => {
@@ -286,53 +291,50 @@ export default function BillFormScreen() {
 
         <View style={styles.row}>
           <Text style={styles.label}>Amount</Text>
-          <View style={styles.moneyWrap}>
-            <Text style={styles.moneyPrefix}>£</Text>
+          <View style={styles.moneyRow}>
+            <Text style={styles.pound}>£</Text>
             <TextInput
               value={amountText}
-              onChangeText={(t) => setAmountText(stripMoneyInput(t))}
+              onChangeText={setAmountText}
               placeholder="0.00"
               keyboardType="decimal-pad"
               editable={isEditing}
               style={[styles.moneyInput, !isEditing && styles.inputDisabled]}
             />
           </View>
-          <Text style={styles.helper}>Enter pounds (e.g. 12.34)</Text>
         </View>
 
-        <View style={styles.twoCol}>
-          <View style={[styles.col, { marginRight: 8 }]}>
-            <Text style={styles.label}>Category</Text>
-            <TextInput
-              value={category}
-              onChangeText={setCategory}
-              placeholder="e.g., Utilities"
-              editable={isEditing}
-              style={[styles.input, !isEditing && styles.inputDisabled]}
-            />
-          </View>
-
-          <View style={[styles.col, { marginLeft: 8 }]}>
-            <Text style={styles.label}>Provider</Text>
-            <TextInput
-              value={provider}
-              onChangeText={setProvider}
-              placeholder="e.g., British Gas"
-              editable={isEditing}
-              style={[styles.input, !isEditing && styles.inputDisabled]}
-            />
-          </View>
+        <View style={styles.row2}>
+          <Text style={styles.label}>Provider</Text>
+          <TextInput
+            value={provider}
+            onChangeText={setProvider}
+            placeholder="e.g., British Gas"
+            editable={isEditing}
+            style={[styles.input, !isEditing && styles.inputDisabled]}
+          />
         </View>
 
-        <View style={[styles.row, { marginBottom: 10 }]}>
+        <View style={styles.row2}>
+          <Text style={styles.label}>Category</Text>
+          <TextInput
+            value={category}
+            onChangeText={setCategory}
+            placeholder="e.g., Utilities"
+            editable={isEditing}
+            style={[styles.input, !isEditing && styles.inputDisabled]}
+          />
+        </View>
+
+        <View style={styles.row2}>
           <Text style={styles.label}>Notes</Text>
           <TextInput
             value={notes}
             onChangeText={setNotes}
-            placeholder="Add any notes…"
+            placeholder="Optional"
             editable={isEditing}
             multiline
-            style={[styles.input, styles.notesInput, !isEditing && styles.inputDisabled]}
+            style={[styles.notes, !isEditing && styles.inputDisabled]}
           />
         </View>
 
@@ -394,17 +396,39 @@ export default function BillFormScreen() {
       </View>
 
       <View style={styles.bottomBar}>
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={onPrimaryPress}
-          disabled={saving || (mode === "create" ? !canSubmit : isEditing ? !canSubmit : false)}
-          style={[
-            styles.primaryBtn,
-            (saving || (mode === "create" ? !canSubmit : isEditing ? !canSubmit : false)) && styles.primaryBtnDisabled,
-          ]}
-        >
-          <Text style={styles.primaryText}>{primaryLabel}</Text>
-        </TouchableOpacity>
+        {mode === "edit" && isEditing ? (
+          <View style={styles.bottomRow}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={onUndo}
+              disabled={saving}
+              style={[styles.secondaryBtn, saving && styles.primaryBtnDisabled]}
+            >
+              <Text style={styles.secondaryText}>Undo</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={onPrimaryPress}
+              disabled={saving || !canSubmit}
+              style={[styles.primaryBtn, (saving || !canSubmit) && styles.primaryBtnDisabled]}
+            >
+              <Text style={styles.primaryText}>{saving ? "Updating..." : "Update"}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={onPrimaryPress}
+            disabled={saving || (mode === "create" ? !canSubmit : false)}
+            style={[
+              styles.primaryBtn,
+              (saving || (mode === "create" ? !canSubmit : false)) && styles.primaryBtnDisabled,
+            ]}
+          >
+            <Text style={styles.primaryText}>{primaryLabel}</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -436,6 +460,7 @@ const styles = StyleSheet.create({
   },
 
   row: { marginBottom: 10 },
+  row2: { marginBottom: 8 },
   label: { fontSize: 13, fontWeight: "800", color: vars.ink, marginBottom: 6 },
   input: {
     backgroundColor: "#FFFFFF",
@@ -449,25 +474,32 @@ const styles = StyleSheet.create({
     color: vars.ink,
   },
   inputDisabled: { backgroundColor: "#F3F4F6", color: vars.inkMuted },
-  helper: { marginTop: 5, fontSize: 12, fontWeight: "600", color: vars.inkMuted },
+  notes: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: vars.border,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    fontWeight: "700",
+    color: vars.ink,
+    minHeight: 70,
+    textAlignVertical: "top",
+  },
 
-  moneyWrap: {
+  moneyRow: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
     borderColor: vars.border,
     borderRadius: 12,
     backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    paddingVertical: 2,
+    paddingHorizontal: 10,
+    height: 44,
   },
-  moneyPrefix: { fontSize: 14, fontWeight: "900", color: vars.ink, marginRight: 6 },
-  moneyInput: { flex: 1, paddingVertical: 8, fontSize: 14, fontWeight: "700", color: vars.ink },
-
-  twoCol: { flexDirection: "row", marginBottom: 10 },
-  col: { flex: 1 },
-
-  notesInput: { minHeight: 62, textAlignVertical: "top" },
+  pound: { fontSize: 16, fontWeight: "900", color: vars.ink, marginRight: 6 },
+  moneyInput: { flex: 1, fontSize: 14, fontWeight: "800", color: vars.ink },
 
   section: {
     marginTop: 2,
@@ -478,7 +510,12 @@ const styles = StyleSheet.create({
   },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionTitle: { fontSize: 13, fontWeight: "900", color: vars.ink },
-  togglePill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: vars.ink },
+  togglePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: vars.ink,
+  },
   togglePillOff: { backgroundColor: "#E5E7EB" },
   toggleText: { fontSize: 12, fontWeight: "900", color: "#FFFFFF" },
   toggleTextOff: { color: vars.inkMuted },
@@ -496,7 +533,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
   chipTextSelected: { color: "#FFFFFF" },
 
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 2 },
   metaText: { fontSize: 12, fontWeight: "700", color: vars.inkMuted },
 
   deleteRow: { paddingTop: 8 },
@@ -514,7 +551,27 @@ const styles = StyleSheet.create({
   deleteText: { fontSize: 13, fontWeight: "900", color: "#991B1B" },
 
   bottomBar: { marginTop: 10 },
-  primaryBtn: { height: 52, borderRadius: 16, backgroundColor: vars.ink, alignItems: "center", justifyContent: "center" },
+  bottomRow: { flexDirection: "row", gap: 10 },
+  secondaryBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: vars.border,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  secondaryText: { color: vars.ink, fontSize: 15, fontWeight: "900" },
+
+  primaryBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: vars.ink,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   primaryBtnDisabled: { opacity: 0.45 },
   primaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
 });
