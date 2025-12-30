@@ -7,6 +7,7 @@ export type BillRow = {
   user_id?: string | null;
   name: string;
   amount: number;
+  // Optional columns that may exist in DB
   frequency?: string | null;
   auto_renew?: boolean | null;
   notes?: string | null;
@@ -64,15 +65,23 @@ export async function upsertBill(input: UpsertBillInput): Promise<BillRow> {
   if (amount === null && typeof input.amount_pence === "number") amount = input.amount_pence / 100;
   if (typeof amount !== "number" || Number.isNaN(amount)) throw new Error("Amount is required");
 
+  // Build payload carefully: avoid sending null for NOT NULL columns.
   const payload: any = {
     ...(input.id ? { id: input.id } : {}),
     family_id: familyId,
     name,
     amount,
-    frequency: input.frequency ?? null,
-    auto_renew: typeof input.auto_renew === "boolean" ? input.auto_renew : null,
-    notes: input.notes ?? null,
   };
+
+  if (input.frequency !== undefined) payload.frequency = input.frequency;
+  if (input.notes !== undefined) payload.notes = input.notes;
+
+  // auto_renew is commonly NOT NULL in DB. Never send null; default to false.
+  if (input.auto_renew !== undefined) {
+    payload.auto_renew = Boolean(input.auto_renew);
+  } else {
+    payload.auto_renew = false;
+  }
 
   const { data, error } = await supabase.from("bills").upsert(payload).select("*").single();
   if (error) throw error;

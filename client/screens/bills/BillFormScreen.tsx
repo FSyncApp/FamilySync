@@ -31,7 +31,6 @@ function formatUKDateFromISO(iso?: string) {
 }
 
 function stripMoneyInput(input: string) {
-  // keep digits + dot only
   return input.replace(/[^0-9.]/g, "");
 }
 
@@ -68,14 +67,16 @@ export default function BillFormScreen() {
   const [name, setName] = useState("");
   const [amountText, setAmountText] = useState("");
 
-  // --- Restored UI fields (UI-only for now) ---
+  // --- UI-only fields (not persisted yet) ---
   const [provider, setProvider] = useState("");
   const [category, setCategory] = useState("");
   const [notes, setNotes] = useState("");
 
   const [autoRenewing, setAutoRenewing] = useState(false);
   const [frequency, setFrequency] = useState<Frequency>("monthly");
-  const [renewalDateText, setRenewalDateText] = useState(""); // dd/mm/yyyy text for now
+
+  // Single date field that can be used as either Expiry date (auto-renew off) or Renewal date (auto-renew on)
+  const [dateText, setDateText] = useState(""); // dd/mm/yyyy
 
   const originalRef = useRef<{
     name: string;
@@ -85,7 +86,7 @@ export default function BillFormScreen() {
     notes: string;
     autoRenewing: boolean;
     frequency: Frequency;
-    renewalDateText: string;
+    dateText: string;
   } | null>(null);
 
   const title = useMemo(() => (mode === "create" ? "Add bill" : "Bill"), [mode]);
@@ -105,19 +106,18 @@ export default function BillFormScreen() {
         return;
       }
 
-      // Only stable v0 fields from DB:
+      // Stable fields from DB:
       setName(bill.name ?? "");
       setAmountText(Number(bill.amount ?? 0).toFixed(2));
       setCreatedAt(bill.created_at);
 
-      // UI-only fields default (until schema supports)
+      // UI-only defaults
       setProvider("");
       setCategory("");
       setNotes("");
-
       setAutoRenewing(false);
       setFrequency("monthly");
-      setRenewalDateText("");
+      setDateText("");
 
       originalRef.current = {
         name: bill.name ?? "",
@@ -127,7 +127,7 @@ export default function BillFormScreen() {
         notes: "",
         autoRenewing: false,
         frequency: "monthly",
-        renewalDateText: "",
+        dateText: "",
       };
 
       setIsEditing(false);
@@ -164,7 +164,7 @@ export default function BillFormScreen() {
               setNotes(orig.notes);
               setAutoRenewing(orig.autoRenewing);
               setFrequency(orig.frequency);
-              setRenewalDateText(orig.renewalDateText);
+              setDateText(orig.dateText);
             }
             setIsEditing(false);
           }}
@@ -189,6 +189,8 @@ export default function BillFormScreen() {
     return mode === "create" ? "Save" : "Update";
   }, [isEditing, mode, saving]);
 
+  const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
+
   const onPrimaryPress = async () => {
     if (mode === "edit" && !isEditing) {
       setIsEditing(true);
@@ -204,7 +206,8 @@ export default function BillFormScreen() {
     try {
       const amount = parseMoneyToNumber(amountText);
 
-      // IMPORTANT: schema-safe upsert (Phase 2 v0) — we do NOT send recurring/UI-only fields yet
+      // Schema-safe upsert — UI-only fields not sent yet.
+      // IMPORTANT: upsertBill now defaults auto_renew to false to avoid NOT NULL errors.
       await upsertBill({
         id: mode === "edit" ? billId : undefined,
         name: name.trim(),
@@ -216,7 +219,6 @@ export default function BillFormScreen() {
         return;
       }
 
-      // Update originals + return to view mode (UI-only fields remain UI-only for now)
       originalRef.current = {
         name: name.trim(),
         amountText: Number(amount).toFixed(2),
@@ -225,7 +227,7 @@ export default function BillFormScreen() {
         notes,
         autoRenewing,
         frequency,
-        renewalDateText,
+        dateText,
       };
       setIsEditing(false);
       Alert.alert("Updated", "Your bill has been updated.");
@@ -284,7 +286,7 @@ export default function BillFormScreen() {
 
         <View style={styles.row}>
           <Text style={styles.label}>Amount</Text>
-          <View style={[styles.moneyWrap, (!isEditing || saving) && { opacity: 0.98 }]}>
+          <View style={styles.moneyWrap}>
             <Text style={styles.moneyPrefix}>£</Text>
             <TextInput
               value={amountText}
@@ -334,7 +336,6 @@ export default function BillFormScreen() {
           />
         </View>
 
-        {/* Restored section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Auto-renewing</Text>
@@ -366,14 +367,14 @@ export default function BillFormScreen() {
             })}
           </View>
 
-          <View style={[styles.row, { marginBottom: 0 }, !autoRenewing && { opacity: 0.45 }]}>
-            <Text style={styles.label}>Renewal date</Text>
+          <View style={[styles.row, { marginBottom: 0 }]}>
+            <Text style={styles.label}>{dateLabel}</Text>
             <TextInput
-              value={renewalDateText}
-              onChangeText={setRenewalDateText}
+              value={dateText}
+              onChangeText={setDateText}
               placeholder="dd/mm/yyyy"
-              editable={isEditing && autoRenewing}
-              style={[styles.input, (!isEditing || !autoRenewing) && styles.inputDisabled]}
+              editable={isEditing}
+              style={[styles.input, !isEditing && styles.inputDisabled]}
             />
           </View>
         </View>
@@ -464,13 +465,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   moneyPrefix: { fontSize: 14, fontWeight: "900", color: vars.ink, marginRight: 6 },
-  moneyInput: {
-    flex: 1,
-    paddingVertical: 8,
-    fontSize: 14,
-    fontWeight: "700",
-    color: vars.ink,
-  },
+  moneyInput: { flex: 1, paddingVertical: 8, fontSize: 14, fontWeight: "700", color: vars.ink },
 
   twoCol: { flexDirection: "row", marginBottom: 10 },
   col: { flex: 1 },
@@ -486,12 +481,7 @@ const styles = StyleSheet.create({
   },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   sectionTitle: { fontSize: 13, fontWeight: "900", color: vars.ink },
-  togglePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: vars.ink,
-  },
+  togglePill: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: vars.ink },
   togglePillOff: { backgroundColor: "#E5E7EB" },
   toggleText: { fontSize: 12, fontWeight: "900", color: "#FFFFFF" },
   toggleTextOff: { color: vars.inkMuted },
@@ -527,13 +517,7 @@ const styles = StyleSheet.create({
   deleteText: { fontSize: 13, fontWeight: "900", color: "#991B1B" },
 
   bottomBar: { marginTop: 10 },
-  primaryBtn: {
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: vars.ink,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  primaryBtn: { height: 52, borderRadius: 16, backgroundColor: vars.ink, alignItems: "center", justifyContent: "center" },
   primaryBtnDisabled: { opacity: 0.45 },
   primaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
 });
