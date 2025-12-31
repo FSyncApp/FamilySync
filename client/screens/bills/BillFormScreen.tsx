@@ -1,4 +1,4 @@
-/** FS PATCH MARKER: Bills UI — header actions (Save/Edit/Update) + better titles */
+/** FS PATCH: Bill form UI polish — clearer view mode + require date + confirm £0 (UI-only) */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -78,6 +78,7 @@ export default function BillFormScreen() {
   const [reminderPreset, setReminderPreset] = useState<"1" | "3" | "7" | "14" | "custom">("7");
 
   const [billTitle, setBillTitle] = useState<string>("");
+  const [dateError, setDateError] = useState<string | null>(null);
 
   const originalRef = useRef<{
     name: string;
@@ -98,6 +99,9 @@ export default function BillFormScreen() {
     return !!name.trim() && typeof amt === "number" && !Number.isNaN(amt);
   }, [amountText, name]);
 
+  const hasDate = !!dateISO;
+  const effectiveReminderEnabled = reminderEnabled && hasDate;
+
   const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
 
   useEffect(() => {
@@ -105,10 +109,8 @@ export default function BillFormScreen() {
       // If there is no date, reminders can’t be active.
       setReminderEnabled(false);
     }
+    if (dateISO) setDateError(null);
   }, [dateISO]);
-
-  const hasDate = !!dateISO;
-  const effectiveReminderEnabled = reminderEnabled && hasDate;
 
   const onEditPress = useCallback(() => setIsEditing(true), []);
 
@@ -129,16 +131,11 @@ export default function BillFormScreen() {
     setReminderEnabled(orig.reminderEnabled);
     setReminderDaysBefore(orig.reminderDaysBefore);
     setReminderPreset(orig.reminderPreset);
+    setDateError(null);
     setIsEditing(false);
   }, []);
 
-
-  const onSaveOrUpdate = useCallback(async () => {
-    if (!canSubmit) {
-      Alert.alert("Missing info", "Please enter a bill name and amount.");
-      return;
-    }
-
+  const doSaveOrUpdate = useCallback(async () => {
     setSaving(true);
     try {
       const amount = parseMoneyToNumber(amountText);
@@ -163,7 +160,7 @@ export default function BillFormScreen() {
         return;
       }
 
-      // Update our "original" snapshot to enable undo/back-to-view mode.
+      // Update our "original" snapshot to enable cancel/back-to-view mode.
       originalRef.current = {
         name: name.trim(),
         amountText: Number(amount).toFixed(2),
@@ -189,7 +186,6 @@ export default function BillFormScreen() {
     amountText,
     autoRenewing,
     billId,
-    canSubmit,
     category,
     dateISO,
     frequency,
@@ -203,7 +199,41 @@ export default function BillFormScreen() {
     reminderPreset,
   ]);
 
-  // Title rules (per your request):
+  const onSaveOrUpdate = useCallback(async () => {
+    if (!canSubmit) {
+      Alert.alert("Missing info", "Please enter a bill name and amount.");
+      return;
+    }
+
+    if (!dateISO) {
+      setDateError("Please set a date before saving.");
+      Alert.alert("Missing date", "Please set a renewal/expiry date before saving.");
+      return;
+    }
+
+    const amount = parseMoneyToNumber(amountText);
+    if (Number.isFinite(amount) && amount === 0) {
+      Alert.alert(
+        "Amount is £0",
+        "Are you sure you want this bill total to be £0.00?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: mode === "create" ? "Save anyway" : "Update anyway",
+            style: "default",
+            onPress: () => {
+              doSaveOrUpdate();
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    await doSaveOrUpdate();
+  }, [amountText, canSubmit, dateISO, doSaveOrUpdate, mode]);
+
+  // Title rules:
   // - Create: "Add bill"
   // - Edit: show bill name if we have one, otherwise "Bills"
   const headerTitle = useMemo(() => {
@@ -303,7 +333,7 @@ export default function BillFormScreen() {
       setReminderEnabled(reEnabled);
       setReminderDaysBefore(safeDays);
       setReminderPreset(
-        (safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14)
+        safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14
           ? (String(safeDays) as any)
           : "custom"
       );
@@ -322,12 +352,13 @@ export default function BillFormScreen() {
         reminderEnabled: reEnabled,
         reminderDaysBefore: safeDays,
         reminderPreset:
-          (safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14)
+          safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14
             ? (String(safeDays) as any)
             : "custom",
       };
 
       setIsEditing(false);
+      setDateError(null);
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to load bill");
       navigation.goBack();
@@ -353,6 +384,13 @@ export default function BillFormScreen() {
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 18 }}>
+        {mode === "edit" && !isEditing && (
+          <View style={styles.readOnlyBanner}>
+            <Ionicons name="eye-outline" size={16} color={vars.inkMuted} />
+            <Text style={styles.readOnlyBannerText}>View mode • Tap Edit to make changes</Text>
+          </View>
+        )}
+
         <View style={styles.card}>
           <View style={styles.row}>
             <Text style={styles.label}>Bill name</Text>
@@ -367,15 +405,15 @@ export default function BillFormScreen() {
 
           <View style={styles.row}>
             <Text style={styles.label}>Amount</Text>
-            <View style={styles.moneyRow}>
-              <Text style={styles.pound}>£</Text>
+            <View style={[styles.moneyRow, !isEditing && styles.moneyRowDisabled]}>
+              <Text style={[styles.pound, !isEditing && styles.poundDisabled]}>£</Text>
               <TextInput
                 value={amountText}
                 onChangeText={setAmountText}
                 placeholder="0.00"
                 keyboardType="decimal-pad"
                 editable={isEditing}
-                style={[styles.moneyInput, !isEditing && styles.inputDisabled]}
+                style={[styles.moneyInput, !isEditing && styles.moneyInputDisabled]}
               />
             </View>
           </View>
@@ -420,7 +458,12 @@ export default function BillFormScreen() {
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => isEditing && setAutoRenewing((v) => !v)}
-                style={[styles.togglePill, (!isEditing || !autoRenewing) && styles.togglePillOff]}
+                disabled={!isEditing}
+                style={[
+                  styles.togglePill,
+                  (!isEditing || !autoRenewing) && styles.togglePillOff,
+                  !isEditing && styles.disabledPill,
+                ]}
               >
                 <Text style={[styles.toggleText, (!isEditing || !autoRenewing) && styles.toggleTextOff]}>
                   {autoRenewing ? "On" : "Off"}
@@ -428,7 +471,7 @@ export default function BillFormScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={[styles.freqRow, !autoRenewing && { opacity: 0.45 }]}>
+            <View style={[styles.freqRow, !autoRenewing && { opacity: 0.45 }, !isEditing && { opacity: 0.55 }]}>
               {FREQ_OPTIONS.map((opt) => {
                 const selected = frequency === opt.key;
                 return (
@@ -453,6 +496,8 @@ export default function BillFormScreen() {
               placeholder="dd/mm/yyyy"
             />
 
+            {!!dateError && <Text style={styles.errorInline}>{dateError}</Text>}
+
             <View style={styles.reminderSection}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Reminders</Text>
@@ -463,6 +508,7 @@ export default function BillFormScreen() {
                   style={[
                     styles.togglePill,
                     (!isEditing || !hasDate || !effectiveReminderEnabled) && styles.togglePillOff,
+                    !isEditing && styles.disabledPill,
                   ]}
                 >
                   <Text
@@ -559,6 +605,20 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vars.bg, padding: 14 },
   center: { alignItems: "center", justifyContent: "center" },
 
+  readOnlyBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: vars.border,
+    backgroundColor: "rgba(255,255,255,0.75)",
+    marginBottom: 10,
+  },
+  readOnlyBannerText: { fontSize: 12, fontWeight: "800", color: vars.inkMuted },
+
   card: {
     backgroundColor: vars.card,
     borderRadius: 18,
@@ -610,8 +670,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     height: 44,
   },
+  moneyRowDisabled: { backgroundColor: "#F3F4F6" },
   pound: { fontSize: 16, fontWeight: "900", color: vars.ink, marginRight: 6 },
+  poundDisabled: { color: vars.inkMuted },
   moneyInput: { flex: 1, fontSize: 14, fontWeight: "800", color: vars.ink },
+  moneyInputDisabled: { color: vars.inkMuted },
 
   section: {
     marginTop: 2,
@@ -629,6 +692,7 @@ const styles = StyleSheet.create({
     backgroundColor: vars.ink,
   },
   togglePillOff: { backgroundColor: "#E5E7EB" },
+  disabledPill: { opacity: 0.7 },
   toggleText: { fontSize: 12, fontWeight: "900", color: "#FFFFFF" },
   toggleTextOff: { color: vars.inkMuted },
 
@@ -644,6 +708,8 @@ const styles = StyleSheet.create({
   chipSelected: { backgroundColor: vars.ink, borderColor: vars.ink },
   chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
   chipTextSelected: { color: "#FFFFFF" },
+
+  errorInline: { marginTop: 8, fontSize: 12, fontWeight: "800", color: "#B91C1C" },
 
   reminderSection: { marginTop: 12 },
   reminderChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
