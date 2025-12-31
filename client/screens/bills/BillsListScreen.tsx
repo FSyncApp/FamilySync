@@ -100,7 +100,7 @@ export default function BillsListScreen() {
 
   return (
     <View style={styles.screen}>
-      <Text style={styles.descriptor} numberOfLines={1}>
+      <Text style={[styles.descriptor,{textAlign:"center",alignSelf:"center"}]} numberOfLines={1}>
         Keep your family’s bills synchronised.
       </Text>
 
