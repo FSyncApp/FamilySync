@@ -1,4 +1,4 @@
-/** FS PATCH MARKER: Bills UI — header delete + pinned bottom bar + scroll */
+/** FS PATCH MARKER: Bills UI — header actions (Save/Edit/Update) + better titles */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -57,6 +57,7 @@ export default function BillFormScreen() {
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
 
+  // In edit mode, we start in view-only until the user taps Edit.
   const [isEditing, setIsEditing] = useState(mode === "create");
 
   const [createdAt, setCreatedAt] = useState<string | undefined>(undefined);
@@ -76,6 +77,8 @@ export default function BillFormScreen() {
   const [reminderDaysBefore, setReminderDaysBefore] = useState<number>(7);
   const [reminderPreset, setReminderPreset] = useState<"1" | "3" | "7" | "14" | "custom">("7");
 
+  const [billTitle, setBillTitle] = useState<string>("");
+
   const originalRef = useRef<{
     name: string;
     amountText: string;
@@ -90,7 +93,44 @@ export default function BillFormScreen() {
     reminderPreset: "1" | "3" | "7" | "14" | "custom";
   } | null>(null);
 
-  const title = useMemo(() => (mode === "create" ? "Add bill" : "Bill"), [mode]);
+  const canSubmit = useMemo(() => {
+    const amt = parseMoneyToNumber(amountText);
+    return !!name.trim() && typeof amt === "number" && !Number.isNaN(amt);
+  }, [amountText, name]);
+
+  const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
+
+  useEffect(() => {
+    if (!dateISO) {
+      // If there is no date, reminders can’t be active.
+      setReminderEnabled(false);
+    }
+  }, [dateISO]);
+
+  const hasDate = !!dateISO;
+  const effectiveReminderEnabled = reminderEnabled && hasDate;
+
+  const onEditPress = useCallback(() => setIsEditing(true), []);
+
+  const onUndo = useCallback(() => {
+    const orig = originalRef.current;
+    if (!orig) {
+      setIsEditing(false);
+      return;
+    }
+    setName(orig.name);
+    setAmountText(orig.amountText);
+    setProvider(orig.provider);
+    setCategory(orig.category);
+    setNotes(orig.notes);
+    setAutoRenewing(orig.autoRenewing);
+    setFrequency(orig.frequency);
+    setDateISO(orig.dateISO);
+    setReminderEnabled(orig.reminderEnabled);
+    setReminderDaysBefore(orig.reminderDaysBefore);
+    setReminderPreset(orig.reminderPreset);
+    setIsEditing(false);
+  }, []);
 
   const onDelete = useCallback(async () => {
     if (!billId) return;
@@ -114,25 +154,146 @@ export default function BillFormScreen() {
     ]);
   }, [billId, navigation]);
 
+  const onSaveOrUpdate = useCallback(async () => {
+    if (!canSubmit) {
+      Alert.alert("Missing info", "Please enter a bill name and amount.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const amount = parseMoneyToNumber(amountText);
+
+      await upsertBill({
+        id: mode === "edit" ? billId : undefined,
+        name: name.trim(),
+        amount,
+        provider: provider.trim(),
+        category: category.trim(),
+        notes: notes.trim(),
+        auto_renew: autoRenewing,
+        frequency,
+        expiry_date: autoRenewing ? null : (dateISO || null),
+        renewal_date: autoRenewing ? (dateISO || null) : null,
+        reminder_enabled: reminderEnabled,
+        reminder_days_before: reminderDaysBefore,
+      } as any);
+
+      if (mode === "create") {
+        navigation.goBack();
+        return;
+      }
+
+      // Update our "original" snapshot to enable undo/back-to-view mode.
+      originalRef.current = {
+        name: name.trim(),
+        amountText: Number(amount).toFixed(2),
+        provider,
+        category,
+        notes,
+        autoRenewing,
+        frequency,
+        dateISO,
+        reminderEnabled,
+        reminderDaysBefore,
+        reminderPreset,
+      };
+
+      setBillTitle(name.trim());
+      setIsEditing(false);
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    amountText,
+    autoRenewing,
+    billId,
+    canSubmit,
+    category,
+    dateISO,
+    frequency,
+    mode,
+    name,
+    navigation,
+    notes,
+    provider,
+    reminderDaysBefore,
+    reminderEnabled,
+    reminderPreset,
+  ]);
+
+  // Title rules (per your request):
+  // - Create: "Add bill"
+  // - Edit: show bill name if we have one, otherwise "Bills"
+  const headerTitle = useMemo(() => {
+    if (mode === "create") return "Add bill";
+    return billTitle?.trim() ? billTitle.trim() : "Bills";
+  }, [billTitle, mode]);
+
+  // Header actions (Option A)
   useEffect(() => {
-    // Header: title always; delete icon only on existing bills.
     navigation.setOptions({
-      title,
-      headerRight:
-        mode === "edit"
-          ? () => (
-              <TouchableOpacity
-                onPress={onDelete}
-                disabled={saving}
-                style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: saving ? 0.5 : 1 }}
-                accessibilityLabel="Delete bill"
-              >
-                <Ionicons name="trash-outline" size={20} color="#991B1B" />
-              </TouchableOpacity>
-            )
-          : () => null,
+      title: headerTitle,
+      headerLeft: () =>
+        mode === "edit" && isEditing ? (
+          <TouchableOpacity
+            onPress={onUndo}
+            disabled={saving}
+            style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: saving ? 0.5 : 1 }}
+            accessibilityLabel="Undo changes"
+          >
+            <Text style={{ fontSize: 15, fontWeight: "900", color: vars.inkMuted }}>Undo</Text>
+          </TouchableOpacity>
+        ) : null,
+      headerRight: () => {
+        // Create: Save
+        if (mode === "create") {
+          const disabled = saving || !canSubmit;
+          return (
+            <TouchableOpacity
+              onPress={onSaveOrUpdate}
+              disabled={disabled}
+              style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: disabled ? 0.5 : 1 }}
+              accessibilityLabel="Save bill"
+            >
+              <Text style={{ fontSize: 15, fontWeight: "900", color: vars.ink }}>Save</Text>
+            </TouchableOpacity>
+          );
+        }
+
+        // Edit: View mode => Edit + Trash
+        //       Editing  => Update + Trash
+        const actionLabel = isEditing ? (saving ? "Updating…" : "Update") : "Edit";
+        const actionDisabled = saving || (isEditing ? !canSubmit : false);
+
+        return (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <TouchableOpacity
+              onPress={() => (isEditing ? onSaveOrUpdate() : onEditPress())}
+              disabled={actionDisabled}
+              style={{ paddingHorizontal: 10, paddingVertical: 6, opacity: actionDisabled ? 0.5 : 1 }}
+              accessibilityLabel={isEditing ? "Update bill" : "Edit bill"}
+            >
+              <Text style={{ fontSize: 15, fontWeight: "900", color: vars.ink }}>
+                {actionLabel}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={onDelete}
+              disabled={saving}
+              style={{ paddingHorizontal: 10, paddingVertical: 6, opacity: saving ? 0.5 : 1 }}
+              accessibilityLabel="Delete bill"
+            >
+              <Ionicons name="trash-outline" size={20} color="#991B1B" />
+            </TouchableOpacity>
+          </View>
+        );
+      },
     });
-  }, [mode, navigation, onDelete, saving, title]);
+  }, [canSubmit, headerTitle, isEditing, mode, navigation, onDelete, onEditPress, onSaveOrUpdate, onUndo, saving]);
 
   const load = useCallback(async () => {
     if (mode !== "edit") return;
@@ -175,7 +336,13 @@ export default function BillFormScreen() {
       const safeDays = Number.isFinite(reDays) && reDays > 0 ? reDays : 7;
       setReminderEnabled(reEnabled);
       setReminderDaysBefore(safeDays);
-      setReminderPreset((safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14) ? String(safeDays) as any : "custom");
+      setReminderPreset(
+        (safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14)
+          ? (String(safeDays) as any)
+          : "custom"
+      );
+
+      setBillTitle(loadedName);
 
       originalRef.current = {
         name: loadedName,
@@ -188,7 +355,10 @@ export default function BillFormScreen() {
         dateISO: String(iso ?? ""),
         reminderEnabled: reEnabled,
         reminderDaysBefore: safeDays,
-        reminderPreset: (safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14) ? (String(safeDays) as any) : "custom",
+        reminderPreset:
+          (safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14)
+            ? (String(safeDays) as any)
+            : "custom",
       };
 
       setIsEditing(false);
@@ -204,98 +374,6 @@ export default function BillFormScreen() {
     load();
   }, [load]);
 
-  const canSubmit = useMemo(() => {
-    const amt = parseMoneyToNumber(amountText);
-    return !!name.trim() && typeof amt === "number" && !Number.isNaN(amt);
-  }, [amountText, name]);
-
-  const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
-
-  useEffect(() => {
-    if (!dateISO) {
-      // If there is no date, reminders can’t be active.
-      setReminderEnabled(false);
-    }
-  }, [dateISO]);
-
-  const hasDate = !!dateISO;
-  const remindersBlocked = !hasDate;
-  const effectiveReminderEnabled = reminderEnabled && !remindersBlocked;
-
-  const onEditPress = () => setIsEditing(true);
-
-  const onUndo = () => {
-    const orig = originalRef.current;
-    if (!orig) {
-      setIsEditing(false);
-      return;
-    }
-    setName(orig.name);
-    setAmountText(orig.amountText);
-    setProvider(orig.provider);
-    setCategory(orig.category);
-    setNotes(orig.notes);
-    setAutoRenewing(orig.autoRenewing);
-    setFrequency(orig.frequency);
-    setDateISO(orig.dateISO);
-    setReminderEnabled(orig.reminderEnabled);
-    setReminderDaysBefore(orig.reminderDaysBefore);
-    setReminderPreset(orig.reminderPreset);
-    setIsEditing(false);
-  };
-
-  const onSaveOrUpdate = async () => {
-    if (!canSubmit) {
-      Alert.alert("Missing info", "Please enter a bill name and amount.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const amount = parseMoneyToNumber(amountText);
-
-      await upsertBill({
-        id: mode === "edit" ? billId : undefined,
-        name: name.trim(),
-        amount,
-        provider: provider.trim(),
-        category: category.trim(),
-        notes: notes.trim(),
-        auto_renew: autoRenewing,
-        frequency,
-        expiry_date: autoRenewing ? null : (dateISO || null),
-        renewal_date: autoRenewing ? (dateISO || null) : null,
-        reminder_enabled: reminderEnabled,
-        reminder_days_before: reminderDaysBefore,
-      } as any);
-
-      if (mode === "create") {
-        navigation.goBack();
-        return;
-      }
-
-      originalRef.current = {
-        name: name.trim(),
-        amountText: Number(amount).toFixed(2),
-        provider,
-        category,
-        notes,
-        autoRenewing,
-        frequency,
-        dateISO,
-        reminderEnabled,
-        reminderDaysBefore,
-        reminderPreset,
-      };
-
-      setIsEditing(false);
-    } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "Failed to save");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   if (loading) {
     return (
       <View style={[styles.screen, styles.center]}>
@@ -308,7 +386,7 @@ export default function BillFormScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 96 }}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 18 }}>
         <View style={styles.card}>
           <View style={styles.row}>
             <Text style={styles.label}>Bill name</Text>
@@ -498,45 +576,6 @@ export default function BillFormScreen() {
           )}
         </View>
       </ScrollView>
-
-      <View style={styles.bottomBarFixed}>
-        {mode === "edit" ? (
-          isEditing ? (
-            <View style={styles.bottomRow}>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={onUndo}
-                disabled={saving}
-                style={[styles.secondaryBtn, saving && styles.primaryBtnDisabled]}
-              >
-                <Text style={styles.secondaryText}>Undo</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={onSaveOrUpdate}
-                disabled={saving || !canSubmit}
-                style={[styles.primaryBtn, (saving || !canSubmit) && styles.primaryBtnDisabled]}
-              >
-                <Text style={styles.primaryText}>{saving ? "Updating..." : "Update"}</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity activeOpacity={0.9} onPress={onEditPress} style={styles.primaryBtn}>
-              <Text style={styles.primaryText}>Edit</Text>
-            </TouchableOpacity>
-          )
-        ) : (
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={onSaveOrUpdate}
-            disabled={saving || !canSubmit}
-            style={[styles.primaryBtn, (saving || !canSubmit) && styles.primaryBtnDisabled]}
-          >
-            <Text style={styles.primaryText}>{saving ? "Saving..." : "Save"}</Text>
-          </TouchableOpacity>
-        )}
-      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -640,7 +679,6 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
   chipTextSelected: { color: "#FFFFFF" },
 
-
   reminderSection: { marginTop: 12 },
   reminderChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
   helperText: { marginTop: 8, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
@@ -668,35 +706,4 @@ const styles = StyleSheet.create({
 
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 2 },
   metaText: { fontSize: 12, fontWeight: "700", color: vars.inkMuted },
-
-  bottomBarFixed: {
-    position: "absolute",
-    left: 14,
-    right: 14,
-    bottom: 14,
-  },
-  bottomRow: { flexDirection: "row", gap: 10 },
-
-  secondaryBtn: {
-    flex: 1,
-    height: 52,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: vars.border,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  secondaryText: { color: vars.ink, fontSize: 15, fontWeight: "900" },
-
-  primaryBtn: {
-    flex: 1,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: vars.ink,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  primaryBtnDisabled: { opacity: 0.45 },
-  primaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
 });
