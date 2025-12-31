@@ -14,9 +14,14 @@ import AllFeaturesScreen from "../screens/AllFeaturesScreen";
  * - Home (reference surface)
  * - Birthdays flow (Phase 1)
  * - BillsStack entry (Phase 2 scaffold) — Bills screens live in their own stack
+ *
+ * NOTE:
+ * We intentionally name the root screen "HomeMain" (not "Home") to avoid
+ * nested duplicate screen names with MainTabs' "Home" tab:
+ *   Main > Home, Main > Home > Home
  */
 export type HomeStackParamList = {
-  Home: undefined;
+  HomeMain: undefined;
   AllFeatures: undefined;
 
   // Phase 1: Birthdays flow
@@ -41,7 +46,7 @@ const Stack = createNativeStackNavigator<HomeStackParamList>();
 export default function HomeStack() {
   return (
     <Stack.Navigator>
-      <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="HomeMain" component={HomeScreen} options={{ headerShown: false }} />
 
       <Stack.Screen
         name="AllFeatures"
