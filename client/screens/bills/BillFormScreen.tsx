@@ -105,12 +105,16 @@ export default function BillFormScreen() {
   const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
 
   useEffect(() => {
-    if (!dateISO) {
-      // If there is no date, reminders can’t be active.
+    if (!dateISO) {s can’t be active.
       setReminderEnabled(false);
     }
     if (dateISO) setDateError(null);
   }, [dateISO]);
+
+  useEffect(() => {
+    if (!autoRenewing) setDateError(null);
+  }, [autoRenewing]);
+
 
   const onEditPress = useCallback(() => setIsEditing(true), []);
 
@@ -205,9 +209,9 @@ export default function BillFormScreen() {
       return;
     }
 
-    if (!dateISO) {
-      setDateError("Please set a date before saving.");
-      Alert.alert("Missing date", "Please set a renewal/expiry date before saving.");
+    if (autoRenewing && !dateISO) {
+      setDateError("Please set a renewal date before saving.");
+      Alert.alert("Missing renewal date", "Please set a renewal date before saving.");
       return;
     }
 
