@@ -17,7 +17,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 
 import type { BillsStackParamList } from "../../navigation/BillsStack";
-import { getBillById, upsertBill } from "../../data/billsStore";
+import { deleteBill, getBillById, upsertBill } from "../../data/billsStore";
 import DateField from "../../components/DateField";
 
 type R = RouteProp<BillsStackParamList, "BillForm">;
@@ -139,6 +139,30 @@ export default function BillFormScreen() {
     setDateError(null);
     setIsEditing(false);
   }, []);
+
+  const onDelete = useCallback(() => {
+    if (mode !== "edit" || !billId) return;
+
+    Alert.alert("Delete bill?", "This can’t be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            setSaving(true);
+            await deleteBill(billId);
+            navigation.goBack();
+          } catch (e: any) {
+            Alert.alert("Error", e?.message ?? "Failed to delete");
+          } finally {
+            setSaving(false);
+          }
+        },
+      },
+    ]);
+  }, [billId, mode, navigation]);
+
 
   const doSaveOrUpdate = useCallback(async () => {
     setSaving(true);
@@ -277,17 +301,41 @@ export default function BillFormScreen() {
           );
         }
 
-        // Edit: View mode => Edit
-        //       Editing  => Update
+        // Edit: View mode => Edit + Trash
+        //       Editing  => Update (no Trash while editing)
         const label = isEditing ? (saving ? "Updating…" : "Update") : "Edit";
         const disabled = saving || (isEditing ? !canSubmit : false);
 
+        if (!isEditing) {
+          return (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <TouchableOpacity
+                onPress={onEditPress}
+                disabled={disabled}
+                style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: disabled ? 0.5 : 1 }}
+                accessibilityLabel="Edit bill"
+              >
+                <Text style={{ fontSize: 15, fontWeight: "900", color: vars.ink }}>Edit</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={onDelete}
+                disabled={saving}
+                style={{ paddingHorizontal: 10, paddingVertical: 6, opacity: saving ? 0.5 : 1 }}
+                accessibilityLabel="Delete bill"
+              >
+                <Ionicons name="trash-outline" size={20} color="#991B1B" />
+              </TouchableOpacity>
+            </View>
+          );
+        }
+
         return (
           <TouchableOpacity
-            onPress={() => (isEditing ? onSaveOrUpdate() : onEditPress())}
+            onPress={onSaveOrUpdate}
             disabled={disabled}
             style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: disabled ? 0.5 : 1 }}
-            accessibilityLabel={isEditing ? "Update bill" : "Edit bill"}
+            accessibilityLabel="Update bill"
           >
             <Text style={{ fontSize: 15, fontWeight: "900", color: vars.ink }}>{label}</Text>
           </TouchableOpacity>
