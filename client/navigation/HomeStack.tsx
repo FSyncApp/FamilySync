@@ -7,6 +7,7 @@ import BirthdayDetailScreen from "../screens/BirthdayDetailScreen";
 import BirthdaysEditScreen from "../screens/BirthdaysEditScreen";
 
 import BillsStack from "./BillsStack";
+import AllFeaturesScreen from "../screens/AllFeaturesScreen";
 
 /**
  * HomeStack hosts:
@@ -16,6 +17,7 @@ import BillsStack from "./BillsStack";
  */
 export type HomeStackParamList = {
   Home: undefined;
+  AllFeatures: undefined;
 
   // Phase 1: Birthdays flow
   Birthdays: undefined;
@@ -40,6 +42,12 @@ export default function HomeStack() {
   return (
     <Stack.Navigator>
       <Stack.Screen name="Home" component={HomeScreen} options={{ headerShown: false }} />
+
+      <Stack.Screen
+        name="AllFeatures"
+        component={AllFeaturesScreen}
+        options={{ title: "All features", headerBackTitleVisible: false }}
+      />
 
       {/* Bills lives in its own stack — hide header here so BillsStack owns titles/back */}
       <Stack.Screen name="Bills" component={BillsStack} options={{ headerShown: false }} />

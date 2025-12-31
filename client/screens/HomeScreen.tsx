@@ -115,7 +115,7 @@ export default function HomeScreen() {
   };
 
   const onMenuPress = () => {
-    (navigation as any).navigate("Bills");
+    (navigation as any).navigate("AllFeatures");
   };
 
   const onTodayScrollBegin = () => {
@@ -215,12 +215,12 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityLabel="Open menu"
+            accessibilityLabel="All features"
             onPress={onMenuPress}
             hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             style={styles.menuButton}
           >
-            <Ionicons name="menu-outline" size={24} color={stylesVars.ink} />
+            <Ionicons name="apps-outline" size={22} color={stylesVars.ink} />
           </TouchableOpacity>
         </View>
 
