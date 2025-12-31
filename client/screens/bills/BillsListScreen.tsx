@@ -1,4 +1,4 @@
-/** FS PATCH: Bills UI polish — tiles, stats boxes, add-tile */
+/** FS PATCH: Bills UI polish — per-bill tiles + stats + add-tile (UI-only) */
 import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import {
   View,
@@ -24,6 +24,11 @@ function formatGBP(amount: number) {
   return `£${v.toFixed(2)}`;
 }
 
+function formatDateShort(d: Date) {
+  // Locale-aware, short + readable
+  return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+}
+
 export default function BillsListScreen() {
   const navigation = useNavigation<Nav>();
   const [loading, setLoading] = useState(true);
@@ -37,6 +42,7 @@ export default function BillsListScreen() {
       const next = await listBills();
       setItems(Array.isArray(next) ? next : []);
     } catch (e: any) {
+      // Don't wipe existing bills on transient errors
       setLoadError(e?.message ?? "Failed to load bills.");
     } finally {
       setLoading(false);
@@ -44,7 +50,11 @@ export default function BillsListScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -67,43 +77,94 @@ export default function BillsListScreen() {
     load();
   }, [load]);
 
-  const nextReminderLabel = useMemo(() => {
-    const withReminder = items
+  const { nextReminderLabel, nextReminderRaw } = useMemo(() => {
+    const reminderDates = items
       .map((i: any) => i.reminderAt)
       .filter(Boolean)
-      .map((d: string) => new Date(d))
-      .sort((a, b) => a.getTime() - b.getTime());
-    if (!withReminder.length) return "None set";
-    return withReminder[0].toLocaleDateString();
+      .map((s: string) => new Date(s))
+      .filter((d: Date) => !Number.isNaN(d.getTime()))
+      .sort((a: Date, b: Date) => a.getTime() - b.getTime());
+
+    if (!reminderDates.length) return { nextReminderLabel: "None set", nextReminderRaw: null as Date | null };
+
+    const d = reminderDates[0];
+    return { nextReminderLabel: formatDateShort(d), nextReminderRaw: d };
   }, [items]);
 
-  const renderItem = useCallback(
+  const showEmpty = !loading && items.length === 0 && !loadError;
+
+  const data = useMemo(() => {
+    if (loading || showEmpty) return [];
+    return [...items, { id: "__add__", name: "" } as any];
+  }, [items, loading, showEmpty]);
+
+  const BillTile = useCallback(
     ({ item }: { item: BillRow }) => {
       const provider = (item as any).provider ?? "";
+      const frequency = (item as any).frequency ?? "";
+      const reminderAt = (item as any).reminderAt ? new Date((item as any).reminderAt) : null;
+      const hasReminder = reminderAt && !Number.isNaN(reminderAt.getTime());
+
       return (
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => navigation.navigate("BillForm", { mode: "edit", billId: item.id })}
-          style={styles.row}
+          style={styles.tile}
         >
-          <View style={styles.rowLeft}>
-            <Text style={styles.rowTitle} numberOfLines={1}>{item.name}</Text>
-            {!!provider && (
-              <Text style={styles.rowSub} numberOfLines={1}>{provider}</Text>
-            )}
+          <View style={styles.tileTop}>
+            <View style={{ flex: 1, paddingRight: 10 }}>
+              <Text style={styles.tileTitle} numberOfLines={1}>
+                {item.name}
+              </Text>
+
+              {!!provider && (
+                <Text style={styles.tileSub} numberOfLines={1}>
+                  {provider}
+                </Text>
+              )}
+
+              {!!frequency && (
+                <Text style={styles.tileMeta} numberOfLines={1}>
+                  {frequency}
+                </Text>
+              )}
+            </View>
+
+            <View style={styles.tileRight}>
+              <Text style={styles.tileAmount} numberOfLines={1}>
+                {formatGBP(item.amount)}
+              </Text>
+              <Ionicons name="chevron-forward" size={18} color={vars.inkMuted} />
+            </View>
           </View>
 
-          <View style={styles.rowRight}>
-            <Text style={styles.rowAmount}>{formatGBP(item.amount)}</Text>
-            <Ionicons name="chevron-forward" size={18} color={vars.inkMuted} style={{ marginLeft: 6 }} />
-          </View>
+          {hasReminder && (
+            <View style={styles.reminderPill}>
+              <Ionicons name="alarm-outline" size={14} color={vars.inkMuted} />
+              <Text style={styles.reminderText} numberOfLines={1}>
+                Reminder {formatDateShort(reminderAt!)}
+              </Text>
+            </View>
+          )}
         </TouchableOpacity>
       );
     },
     [navigation]
   );
 
-  const showEmpty = !loading && items.length === 0 && !loadError;
+  const AddTile = useCallback(
+    () => (
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onPress={() => navigation.navigate("BillForm", { mode: "create" })}
+        style={[styles.tile, styles.addTile]}
+      >
+        <Ionicons name="add-circle-outline" size={20} color={vars.inkMuted} />
+        <Text style={styles.addTileText}>Add bill</Text>
+      </TouchableOpacity>
+    ),
+    [navigation]
+  );
 
   return (
     <View style={styles.screen}>
@@ -111,7 +172,7 @@ export default function BillsListScreen() {
         Keep your family’s bills synchronised.
       </Text>
 
-      {!showEmpty && (
+      {!showEmpty && !loading && (
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
             <Text style={styles.statLabel}>Total bills</Text>
@@ -119,49 +180,52 @@ export default function BillsListScreen() {
           </View>
           <View style={styles.statBox}>
             <Text style={styles.statLabel}>Next reminder</Text>
-            <Text style={styles.statValue}>{nextReminderLabel}</Text>
+            <Text style={styles.statValue} numberOfLines={1}>
+              {nextReminderLabel}
+            </Text>
           </View>
         </View>
       )}
 
       {!!loadError && (
         <View style={styles.errorCard}>
-          <Text style={styles.errorTitle}>Couldn’t load bills</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <Ionicons name="alert-circle-outline" size={18} color={vars.inkMuted} />
+            <Text style={styles.errorTitle}>Couldn’t load bills</Text>
+          </View>
           <Text style={styles.errorText}>{loadError}</Text>
+          <TouchableOpacity activeOpacity={0.85} onPress={load} style={styles.retryBtn}>
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       )}
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator /></View>
+        <View style={styles.center}>
+          <ActivityIndicator />
+        </View>
       ) : showEmpty ? (
         <View style={styles.emptyCard}>
           <Text style={styles.emptyTitle}>No bills yet</Text>
-          <Text style={styles.emptyText}>
-            Add your household bills to keep everything in sync.
-          </Text>
+          <Text style={styles.emptyText}>Add your household bills to keep everything in sync.</Text>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate("BillForm", { mode: "create" })}
+            style={styles.emptyCta}
+          >
+            <Ionicons name="add" size={18} color={vars.ink} />
+            <Text style={styles.emptyCtaText}>Add bill</Text>
+          </TouchableOpacity>
         </View>
       ) : (
-        <View style={styles.card}>
-          <FlatList
-            data={[...items, { id: "__add__", name: "" } as any]}
-            keyExtractor={(it) => it.id}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-            renderItem={({ item }) =>
-              item.id === "__add__" ? (
-                <TouchableOpacity
-                  style={styles.addRow}
-                  onPress={() => navigation.navigate("BillForm", { mode: "create" })}
-                >
-                  <Ionicons name="add-circle-outline" size={20} color={vars.inkMuted} />
-                  <Text style={styles.addText}>Add bill</Text>
-                </TouchableOpacity>
-              ) : (
-                renderItem({ item })
-              )
-            }
-            ItemSeparatorComponent={() => <View style={styles.sep} />}
-          />
-        </View>
+        <FlatList
+          data={data}
+          keyExtractor={(it: any) => it.id}
+          renderItem={({ item }: any) => (item.id === "__add__" ? <AddTile /> : <BillTile item={item} />)}
+          contentContainerStyle={styles.listContent}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+        />
       )}
     </View>
   );
@@ -212,38 +276,51 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(17,24,39,0.06)",
   },
 
-  card: {
+  listContent: { paddingBottom: 20 },
+
+  // Individual bill "tile" (separate cards, slightly smaller than before)
+  tile: {
     backgroundColor: vars.card,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: vars.border,
-    overflow: "hidden",
-  },
-
-  row: {
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    marginBottom: 10,
+  },
+  tileTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  tileTitle: { fontSize: 14, fontWeight: "900", color: vars.ink },
+  tileSub: { marginTop: 3, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
+  tileMeta: { marginTop: 2, fontSize: 11, fontWeight: "700", color: vars.inkMuted },
+
+  tileRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+  tileAmount: { fontSize: 14, fontWeight: "900", color: vars.ink },
+
+  reminderPill: {
+    marginTop: 10,
+    alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: vars.border,
+    backgroundColor: "rgba(17,24,39,0.03)",
   },
-  rowLeft: { flex: 1, paddingRight: 10 },
-  rowTitle: { fontSize: 14, fontWeight: "900", color: vars.ink },
-  rowSub: { marginTop: 2, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
+  reminderText: { fontSize: 11, fontWeight: "800", color: vars.inkMuted },
 
-  rowRight: { flexDirection: "row", alignItems: "center" },
-  rowAmount: { fontSize: 14, fontWeight: "900", color: vars.ink },
-
-  addRow: {
-    paddingVertical: 12,
-    flexDirection: "row",
-    gap: 8,
+  addTile: {
+    borderStyle: "dashed",
+    backgroundColor: "rgba(255,255,255,0.75)",
     alignItems: "center",
     justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+    paddingVertical: 14,
   },
-  addText: { fontSize: 14, fontWeight: "900", color: vars.inkMuted },
-
-  sep: { height: 1, backgroundColor: vars.border },
+  addTileText: { fontSize: 14, fontWeight: "900", color: vars.inkMuted },
 
   emptyCard: {
     backgroundColor: vars.card,
@@ -254,6 +331,20 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { fontSize: 16, fontWeight: "900", color: vars.ink, marginBottom: 6 },
   emptyText: { fontSize: 13, fontWeight: "700", color: vars.inkMuted },
+  emptyCta: {
+    marginTop: 14,
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: vars.border,
+    backgroundColor: "#FFFFFF",
+  },
+  emptyCtaText: { fontSize: 13, fontWeight: "900", color: vars.ink },
 
   errorCard: {
     backgroundColor: vars.card,
@@ -265,4 +356,15 @@ const styles = StyleSheet.create({
   },
   errorTitle: { fontSize: 13, fontWeight: "900", color: vars.ink },
   errorText: { marginTop: 6, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
+  retryBtn: {
+    alignSelf: "flex-start",
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: vars.border,
+    backgroundColor: "#FFFFFF",
+  },
+  retryText: { fontSize: 13, fontWeight: "900", color: vars.ink },
 });
