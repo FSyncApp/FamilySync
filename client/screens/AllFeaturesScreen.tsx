@@ -1,278 +1,309 @@
 import React, { useMemo } from "react";
-import { SafeAreaView, View, Text, StyleSheet, ScrollView, Pressable, Platform } from "react-native";
+import {
+  Alert,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 
 import type { MainTabParamList } from "../navigation/MainTabs";
 
-type FeatureStatus = "LIVE" | "COMING_SOON";
+type FeatureAction =
+  | { kind: "tab"; tab: keyof MainTabParamList; params?: any }
+  | { kind: "route"; route: string }
+  | { kind: "disabled" };
 
-type FeatureRow = {
+type FeatureItem = {
   id: string;
   title: string;
-  subtitle?: string;
+  subtitle: string;
   icon: keyof typeof Ionicons.glyphMap;
-  status: FeatureStatus;
-  onPress?: () => void;
+  action: FeatureAction;
 };
 
-const vars = {
+const stylesVars = {
   bg: "#F5F6F8",
-  card: "rgba(255,255,255,0.92)",
-  border: "rgba(230,232,238,0.75)",
+  card: "rgba(255,255,255,0.96)",
+  border: "rgba(230,232,238,0.9)",
   ink: "#111827",
   inkMuted: "#6B7280",
-  pillBg: "#111827",
-  pillText: "#FFFFFF",
-  soonBg: "#EEF2F7",
-  soonText: "#6B7280",
 };
 
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <Text style={styles.sectionTitle}>{children}</Text>;
+}
+
+function Row({ item, onPress }: { item: FeatureItem; onPress?: () => void }) {
+  const disabled = item.action.kind === "disabled";
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.75}
+      style={[styles.row, disabled && styles.rowDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={item.title}
+    >
+      <View style={styles.rowIcon}>
+        <Ionicons name={item.icon} size={18} color={stylesVars.inkMuted} />
+      </View>
+
+      <View style={styles.rowText}>
+        <Text style={styles.rowTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        <Text style={styles.rowSubtitle} numberOfLines={1}>
+          {item.subtitle}
+        </Text>
+      </View>
+
+      {/* No status labels. Keep chevron only for navigable rows. */}
+      {disabled ? null : <Text style={styles.chev}>›</Text>}
+    </TouchableOpacity>
+  );
+}
+
+/**
+ * All Features (Phase 2 Stage 1)
+ * - Calm discovery surface
+ * - Non-editable
+ * - No status labels ("Live now" / "Coming soon")
+ * - Childcare Coverage is visible but disabled (concept only)
+ */
 export default function AllFeaturesScreen() {
+  // This screen is accessed from HomeStack, but tab switching must route through the parent tab navigator.
   const navigation = useNavigation<BottomTabNavigationProp<any>>();
 
-  const switchTab = (tab: keyof MainTabParamList) => {
-    const parent = (navigation as any).getParent?.();
-    if (parent && typeof parent.navigate === "function") {
-      parent.navigate(tab);
-      return;
-    }
-    (navigation as any).navigate(tab);
-  };
-
-  const rows: FeatureRow[] = useMemo(() => {
-    return [
-      {
-        id: "home",
-        title: "Home",
-        subtitle: "Your daily overview and favourites",
-        icon: "home-outline",
-        status: "LIVE",
-        onPress: () => (navigation as any).goBack(),
-      },
+  const features = useMemo(() => {
+    const core: FeatureItem[] = [
       {
         id: "calendar",
         title: "Calendar",
-        subtitle: "Calendar • Taxi • School",
+        subtitle: "Your shared schedule",
         icon: "calendar-outline",
-        status: "LIVE",
-        onPress: () => switchTab("Calendar"),
+        action: { kind: "tab", tab: "Calendar" },
       },
       {
         id: "messages",
         title: "Messages",
-        subtitle: "Family chats (Phase 1 shell)",
+        subtitle: "Family chats and planning",
         icon: "chatbubble-ellipses-outline",
-        status: "LIVE",
-        onPress: () => switchTab("Messages"),
-      },
-      {
-        id: "birthdays",
-        title: "Birthdays",
-        subtitle: "Reminders, notes, and tracking",
-        icon: "gift-outline",
-        status: "LIVE",
-        onPress: () => (navigation as any).navigate("Birthdays"),
+        action: { kind: "tab", tab: "Messages" },
       },
       {
         id: "bills",
         title: "Bills",
-        subtitle: "Keep your family’s bills synchronised.",
+        subtitle: "Keep your family’s bills synchronised",
         icon: "receipt-outline",
-        status: "LIVE",
-        onPress: () => (navigation as any).navigate("Bills"),
+        action: { kind: "route", route: "Bills" },
       },
       {
-        id: "settings",
-        title: "Settings",
-        subtitle: "Profile, family, and app preferences",
-        icon: "settings-outline",
-        status: "LIVE",
-        onPress: () => switchTab("Settings"),
+        id: "birthdays",
+        title: "Birthdays",
+        subtitle: "Track upcoming birthdays",
+        icon: "gift-outline",
+        action: { kind: "route", route: "Birthdays" },
       },
+      {
+        id: "family",
+        title: "Family",
+        subtitle: "Family & members",
+        icon: "people-outline",
+        // NOTE: We intentionally do NOT list "Settings" as a feature.
+        // Family is a destination within the Settings tab's stack.
+        action: { kind: "tab", tab: "Settings", params: { screen: "FamilyMembers" } as any },
+      },
+    ];
 
-      // Coming soon (visibility only)
+    const planning: FeatureItem[] = [
       {
         id: "tasks",
         title: "Tasks",
-        subtitle: "Shared to-dos (coming soon)",
+        subtitle: "Shared to-dos",
         icon: "checkmark-done-outline",
-        status: "COMING_SOON",
+        action: { kind: "disabled" },
       },
       {
         id: "meals",
-        title: "Meals",
-        subtitle: "Weekly meal planner (coming soon)",
+        title: "Meal planner",
+        subtitle: "Weekly visibility, simple entries",
         icon: "restaurant-outline",
-        status: "COMING_SOON",
+        action: { kind: "disabled" },
       },
       {
         id: "childcare",
-        title: "Childcare Coverage",
-        subtitle: "Coordination view (coming soon)",
+        title: "Childcare coverage",
+        subtitle: "Coordinate childcare responsibilities",
         icon: "people-outline",
-        status: "COMING_SOON",
+        action: { kind: "disabled" },
       },
     ];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    return { core, planning };
   }, []);
+
+  const switchTab = (tab: keyof MainTabParamList, params?: any) => {
+    const parent = (navigation as any).getParent?.();
+    if (parent && typeof parent.navigate === "function") {
+      parent.navigate(tab, params);
+      return;
+    }
+    (navigation as any).navigate(tab, params);
+  };
+
+  const onPressItem = (item: FeatureItem) => {
+    if (item.action.kind === "tab") {
+      switchTab(item.action.tab, (item.action as any).params);
+      return;
+    }
+    if (item.action.kind === "route") {
+      (navigation as any).navigate(item.action.route);
+      return;
+    }
+
+    Alert.alert("Not available yet", "This feature will be added in a later phase.");
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>All features</Text>
-        <Text style={styles.subtitle}>
-          Everything FamilySync can do — live now and coming soon.
+        <Text style={styles.subtitle} numberOfLines={1}>
+          All the apps to keep your family in sync.
         </Text>
 
+        <SectionTitle>Core</SectionTitle>
         <View style={styles.card}>
-          {rows.map((r, idx) => {
-            const isSoon = r.status === "COMING_SOON";
-            const disabled = isSoon || !r.onPress;
-
-            const RowWrap: any = disabled ? View : Pressable;
-
-            return (
-              <RowWrap
-                key={r.id}
-                {...(!disabled
-                  ? {
-                      onPress: r.onPress,
-                      style: ({ pressed }: any) => [styles.rowPressable, pressed && styles.rowPressed],
-                      accessibilityRole: "button",
-                      accessibilityLabel: r.title,
-                    }
-                  : { style: styles.row })}
-              >
-                <View style={[styles.rowInner, idx === 0 ? styles.rowInnerFirst : null]}>
-                  <View style={styles.iconWrap}>
-                    <Ionicons name={r.icon} size={18} color={vars.inkMuted} />
-                  </View>
-
-                  <View style={styles.textWrap}>
-                    <View style={styles.rowTop}>
-                      <Text style={styles.rowTitle} numberOfLines={1}>
-                        {r.title}
-                      </Text>
-
-                      {isSoon ? (
-                        <View style={[styles.pill, styles.pillSoon]}>
-                          <Text style={[styles.pillText, styles.pillTextSoon]}>Coming soon</Text>
-                        </View>
-                      ) : (
-                        <View style={styles.pill}>
-                          <Text style={styles.pillText}>Live</Text>
-                        </View>
-                      )}
-                    </View>
-
-                    {!!r.subtitle ? (
-                      <Text style={styles.rowSubtitle} numberOfLines={1}>
-                        {r.subtitle}
-                      </Text>
-                    ) : null}
-                  </View>
-
-                  {!disabled ? <Text style={styles.chev}>›</Text> : null}
-                </View>
-              </RowWrap>
-            );
-          })}
+          {features.core.map((it, idx) => (
+            <View key={it.id}>
+              <Row item={it} onPress={() => onPressItem(it)} />
+              {idx < features.core.length - 1 ? <View style={styles.divider} /> : null}
+            </View>
+          ))}
         </View>
 
-        <View style={styles.tipCard}>
-          <Text style={styles.tipTitle}>Tip</Text>
-          <Text style={styles.tipBody}>
-            Home shortcuts are favourites. All Features is where everything lives.
-          </Text>
+        <SectionTitle>Planning</SectionTitle>
+        <View style={styles.card}>
+          {features.planning.map((it, idx) => (
+            <View key={it.id}>
+              <Row item={it} onPress={() => onPressItem(it)} />
+              {idx < features.planning.length - 1 ? <View style={styles.divider} /> : null}
+            </View>
+          ))}
         </View>
 
-        <View style={{ height: Platform.OS === "ios" ? 26 : 18 }} />
+        <View style={{ height: 18 }} />
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: vars.bg },
-  content: { paddingHorizontal: 18, paddingTop: 12, paddingBottom: 24 },
+  safe: { flex: 1, backgroundColor: stylesVars.bg },
 
-  title: { fontSize: 26, lineHeight: 32, fontWeight: "800", color: vars.ink, marginBottom: 6 },
-  subtitle: { fontSize: 14, lineHeight: 18, fontWeight: "600", color: vars.inkMuted, marginBottom: 14 },
+  container: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 22,
+  },
+
+  title: {
+    fontSize: 26,
+    lineHeight: 32,
+    fontWeight: "800",
+    color: stylesVars.ink,
+    marginBottom: 6,
+  },
+  subtitle: {
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: stylesVars.inkMuted,
+    marginBottom: 14,
+  },
+
+  sectionTitle: {
+    marginTop: 12,
+    marginBottom: 8,
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "800",
+    color: stylesVars.inkMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
 
   card: {
-    backgroundColor: vars.card,
+    backgroundColor: stylesVars.card,
     borderWidth: 1,
-    borderColor: vars.border,
+    borderColor: stylesVars.border,
     borderRadius: 18,
     overflow: "hidden",
     ...(Platform.OS === "ios"
-      ? { shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 10 } }
+      ? {
+          shadowOpacity: 0.06,
+          shadowRadius: 14,
+          shadowOffset: { width: 0, height: 10 },
+        }
       : { elevation: 1 }),
   },
 
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: stylesVars.border,
+    marginLeft: 52,
+  },
+
   row: {
-    // for non-pressable fallback wrapper
-  },
-
-  rowPressable: {},
-
-  rowPressed: {
-    backgroundColor: "rgba(17,24,39,0.04)",
-  },
-
-  rowInner: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: vars.border,
+    gap: 10,
   },
-  rowInnerFirst: {
-    borderTopWidth: 0,
+  rowDisabled: {
+    opacity: 0.45,
   },
 
-  iconWrap: {
-    width: 30,
-    height: 30,
+  rowIcon: {
+    width: 28,
+    height: 28,
     borderRadius: 10,
+    backgroundColor: "rgba(245,246,248,0.9)",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "rgba(255,255,255,0.6)",
-    borderWidth: 1,
-    borderColor: vars.border,
   },
 
-  textWrap: { flex: 1 },
-  rowTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
-
-  rowTitle: { flex: 1, fontSize: 15, lineHeight: 20, fontWeight: "800", color: vars.ink },
-  rowSubtitle: { marginTop: 2, fontSize: 13, lineHeight: 16, fontWeight: "600", color: vars.inkMuted },
-
-  chev: { fontSize: 22, lineHeight: 22, fontWeight: "800", color: vars.inkMuted },
-
-  pill: {
-    backgroundColor: vars.pillBg,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  rowText: {
+    flex: 1,
+    paddingRight: 6,
   },
-  pillText: { color: vars.pillText, fontSize: 12, fontWeight: "800" },
-
-  pillSoon: { backgroundColor: vars.soonBg },
-  pillTextSoon: { color: vars.soonText },
-
-  tipCard: {
-    marginTop: 12,
-    backgroundColor: vars.card,
-    borderWidth: 1,
-    borderColor: vars.border,
-    borderRadius: 18,
-    padding: 14,
+  rowTitle: {
+    fontSize: 15,
+    lineHeight: 18,
+    fontWeight: "800",
+    color: stylesVars.ink,
   },
-  tipTitle: { fontSize: 13, fontWeight: "900", color: vars.ink, marginBottom: 6 },
-  tipBody: { fontSize: 13, lineHeight: 18, fontWeight: "600", color: vars.inkMuted },
+  rowSubtitle: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: "700",
+    color: stylesVars.inkMuted,
+  },
+
+  chev: {
+    fontSize: 22,
+    color: "#9CA3AF",
+    marginTop: -2,
+    marginLeft: 6,
+  },
 });
