@@ -101,7 +101,7 @@ export default function BillsListScreen() {
   return (
     <View style={styles.screen}>
       <Text style={styles.descriptor} numberOfLines={1}>
-        Keep your family’s bills in one shared place.
+        Keep your family’s bills synchronised.
       </Text>
 
       {!!loadError && (
