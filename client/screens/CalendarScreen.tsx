@@ -218,11 +218,21 @@ function categoryLabel(c: RunCategory) {
   return "Other";
 }
 
-export default function CalendarScreen() {
+export default function CalendarScreen(props: any) {
   const today = useMemo(() => startOfDay(new Date()), []);
   const [selectedDate, setSelectedDate] = useState<Date>(today);
 
-  const [mode, setMode] = useState<CalendarMode>("calendar");
+  const routeParams = props?.route?.params ?? {};
+  const initialMode: CalendarMode = routeParams?.initialMode === "runs" ? "runs" : "calendar";
+  const [mode, setMode] = useState<CalendarMode>(initialMode);
+
+  useEffect(() => {
+    // Clear params after first mount so state restore doesn't keep forcing a mode.
+    if (routeParams?.initialMode) {
+      props?.navigation?.setParams?.({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Calendar details modal (demo items + local merged)
   const [detailsOpen, setDetailsOpen] = useState(false);

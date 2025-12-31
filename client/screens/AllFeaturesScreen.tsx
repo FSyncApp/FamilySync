@@ -17,7 +17,7 @@ import { useNavigation } from "@react-navigation/native";
  * Phase 2 Stage 1: navigation + visibility only.
  * - This screen is non-editable.
  * - Some items navigate to existing surfaces.
- * - Planned items are visible (and may be inert until built).
+ * - "Coming soon" items are visible but inert.
  */
 
 type Action =
@@ -42,7 +42,7 @@ const stylesVars = {
   inkMuted: "#6B7280",
 };
 
-const FEATURES: FeatureItem[] = [
+const LIVE_FEATURES: FeatureItem[] = [
   {
     id: "bills",
     title: "Bills",
@@ -56,6 +56,13 @@ const FEATURES: FeatureItem[] = [
     subtitle: "Your family’s shared plan",
     icon: "calendar-outline",
     action: { kind: "tab", tab: "Calendar" },
+  },
+  {
+    id: "schoolRuns",
+    title: "School runs",
+    subtitle: "Pickups and drop‑offs",
+    icon: "school-outline",
+    action: { kind: "tab", tab: "Calendar", params: { initialMode: "runs" } },
   },
   {
     id: "birthdays",
@@ -78,8 +85,9 @@ const FEATURES: FeatureItem[] = [
     icon: "people-outline",
     action: { kind: "tab", tab: "Settings", screen: "FamilyMembers" },
   },
+];
 
-  // Phase 2 planned surfaces (visible now, but inert until built)
+const COMING_SOON: FeatureItem[] = [
   {
     id: "tasks",
     title: "Tasks",
@@ -104,9 +112,6 @@ const FEATURES: FeatureItem[] = [
     action: { kind: "none" },
     disabled: true,
   },
-];
-
-const COMING_SOON: FeatureItem[] = [
   {
     id: "vault",
     title: "Vault",
@@ -150,7 +155,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({ item, onPress, isLast }: { item: FeatureItem; onPress: () => void; isLast: boolean }) {
+function Row({
+  item,
+  onPress,
+  isLast,
+}: {
+  item: FeatureItem;
+  onPress: () => void;
+  isLast: boolean;
+}) {
   const disabled = !!item.disabled || item.action.kind === "none";
 
   return (
@@ -178,11 +191,8 @@ function Row({ item, onPress, isLast }: { item: FeatureItem; onPress: () => void
           )}
         </View>
 
-        <View style={styles.accessory}>
-          {!disabled ? <Text style={styles.chev}>›</Text> : null}
-        </View>
+        {!disabled ? <Text style={styles.chev}>›</Text> : null}
       </View>
-
       {!isLast ? <View style={styles.divider} /> : null}
     </TouchableOpacity>
   );
@@ -191,16 +201,16 @@ function Row({ item, onPress, isLast }: { item: FeatureItem; onPress: () => void
 export default function AllFeaturesScreen() {
   const navigation = useNavigation<any>();
 
-  const goToTab = (tab: "Home" | "Calendar" | "Messages" | "Settings", screen?: string) => {
+  const goToTab = (tab: "Home" | "Calendar" | "Messages" | "Settings", screen?: string, params?: any) => {
     const parent = navigation.getParent?.();
     if (parent && typeof parent.navigate === "function") {
-      if (screen) parent.navigate(tab, { screen });
-      else parent.navigate(tab);
+      if (screen) parent.navigate(tab, { screen, params });
+      else parent.navigate(tab, params);
       return;
     }
     // Fallback
-    if (screen) navigation.navigate(tab, { screen });
-    else navigation.navigate(tab);
+    if (screen) navigation.navigate(tab, { screen, params });
+    else navigation.navigate(tab, params);
   };
 
   const goToRoute = (route: string) => {
@@ -210,7 +220,7 @@ export default function AllFeaturesScreen() {
   const onItemPress = (item: FeatureItem) => {
     if (item.action.kind === "none") return;
     if (item.action.kind === "tab") {
-      goToTab(item.action.tab, item.action.screen);
+      goToTab(item.action.tab, item.action.screen, item.action.params);
       return;
     }
     if (item.action.kind === "route") {
@@ -228,8 +238,13 @@ export default function AllFeaturesScreen() {
         </Text>
 
         <Section title="Features">
-          {FEATURES.map((item, idx) => (
-            <Row key={item.id} item={item} onPress={() => onItemPress(item)} isLast={idx === FEATURES.length - 1} />
+          {LIVE_FEATURES.map((item, idx) => (
+            <Row
+              key={item.id}
+              item={item}
+              onPress={() => onItemPress(item)}
+              isLast={idx === LIVE_FEATURES.length - 1}
+            />
           ))}
         </Section>
 
@@ -249,6 +264,7 @@ export default function AllFeaturesScreen() {
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
   safe: {
@@ -326,13 +342,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  accessory: {
-    width: 18,
-    alignItems: "flex-end",
-    justifyContent: "center",
-    marginLeft: 6,
-  },
-
   rowTitle: {
     fontSize: 15,
     lineHeight: 18,
@@ -353,6 +362,7 @@ const styles = StyleSheet.create({
   chev: {
     fontSize: 22,
     color: "#9CA3AF",
+    marginLeft: 6,
     marginTop: -2,
   },
 });
