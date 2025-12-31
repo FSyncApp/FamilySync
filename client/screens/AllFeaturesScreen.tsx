@@ -1,175 +1,225 @@
-import React, { useMemo } from "react";
+import React from "react";
 import {
-  Alert,
-  Platform,
   SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
   View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
-import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 
-import type { MainTabParamList } from "../navigation/MainTabs";
+/**
+ * All Features (Discovery Surface)
+ *
+ * Phase 2 Stage 1: navigation + visibility only.
+ * - This screen is non-editable.
+ * - Some items navigate to existing surfaces.
+ * - "Coming soon" items are visible but inert.
+ */
 
-type FeatureAction =
-  | { kind: "tab"; tab: keyof MainTabParamList; params?: any }
+type Action =
+  | { kind: "tab"; tab: "Home" | "Calendar" | "Messages" | "Settings"; screen?: string }
   | { kind: "route"; route: string }
-  | { kind: "disabled" };
+  | { kind: "none" };
 
 type FeatureItem = {
   id: string;
   title: string;
-  subtitle: string;
+  subtitle?: string;
   icon: keyof typeof Ionicons.glyphMap;
-  action: FeatureAction;
+  action: Action;
+  disabled?: boolean;
 };
 
 const stylesVars = {
   bg: "#F5F6F8",
-  card: "rgba(255,255,255,0.96)",
-  border: "rgba(230,232,238,0.9)",
+  card: "rgba(255,255,255,0.92)",
+  border: "rgba(230,232,238,0.75)",
   ink: "#111827",
   inkMuted: "#6B7280",
 };
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <Text style={styles.sectionTitle}>{children}</Text>;
+const LIVE_FEATURES: FeatureItem[] = [
+  {
+    id: "bills",
+    title: "Bills",
+    subtitle: "Track what’s due and when",
+    icon: "receipt-outline",
+    action: { kind: "route", route: "Bills" },
+  },
+  {
+    id: "calendar",
+    title: "Calendar",
+    subtitle: "Your family’s shared plan",
+    icon: "calendar-outline",
+    action: { kind: "tab", tab: "Calendar" },
+  },
+  {
+    id: "birthdays",
+    title: "Birthdays",
+    subtitle: "Keep dates and reminders together",
+    icon: "gift-outline",
+    action: { kind: "route", route: "Birthdays" },
+  },
+  {
+    id: "messages",
+    title: "Messages",
+    subtitle: "A shared place to talk",
+    icon: "chatbubble-ellipses-outline",
+    action: { kind: "tab", tab: "Messages" },
+  },
+  {
+    id: "family",
+    title: "Family",
+    subtitle: "Members and shared space",
+    icon: "people-outline",
+    action: { kind: "tab", tab: "Settings", screen: "FamilyMembers" },
+  },
+];
+
+const COMING_SOON: FeatureItem[] = [
+  {
+    id: "tasks",
+    title: "Tasks",
+    subtitle: "Shared to‑dos and checklists",
+    icon: "checkmark-done-outline",
+    action: { kind: "none" },
+    disabled: true,
+  },
+  {
+    id: "meals",
+    title: "Meals",
+    subtitle: "Basic weekly meal plan",
+    icon: "restaurant-outline",
+    action: { kind: "none" },
+    disabled: true,
+  },
+  {
+    id: "childcare",
+    title: "Childcare coverage",
+    subtitle: "Who’s got it covered on key dates",
+    icon: "heart-outline",
+    action: { kind: "none" },
+    disabled: true,
+  },
+  {
+    id: "vault",
+    title: "Vault",
+    subtitle: "Store key family info securely",
+    icon: "lock-closed-outline",
+    action: { kind: "none" },
+    disabled: true,
+  },
+  {
+    id: "location",
+    title: "Location sharing",
+    subtitle: "Optional family location visibility",
+    icon: "navigate-outline",
+    action: { kind: "none" },
+    disabled: true,
+  },
+  {
+    id: "lists",
+    title: "Lists",
+    subtitle: "Shopping and shared lists",
+    icon: "list-outline",
+    action: { kind: "none" },
+    disabled: true,
+  },
+  {
+    id: "schedules",
+    title: "Schedules",
+    subtitle: "Repeat routines and rotations",
+    icon: "time-outline",
+    action: { kind: "none" },
+    disabled: true,
+  },
+];
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <View style={styles.card}>{children}</View>
+    </View>
+  );
 }
 
-function Row({ item, onPress }: { item: FeatureItem; onPress?: () => void }) {
-  const disabled = item.action.kind === "disabled";
+function Row({
+  item,
+  onPress,
+  isLast,
+}: {
+  item: FeatureItem;
+  onPress: () => void;
+  isLast: boolean;
+}) {
+  const disabled = !!item.disabled || item.action.kind === "none";
 
   return (
     <TouchableOpacity
-      activeOpacity={0.75}
-      style={[styles.row, disabled && styles.rowDisabled]}
+      activeOpacity={0.8}
       onPress={onPress}
       disabled={disabled}
+      style={[styles.rowPress, disabled && styles.rowDisabled]}
       accessibilityRole="button"
       accessibilityLabel={item.title}
     >
-      <View style={styles.rowIcon}>
-        <Ionicons name={item.icon} size={18} color={stylesVars.inkMuted} />
-      </View>
+      <View style={[styles.row, isLast && styles.rowLast]}>
+        <View style={styles.iconWrap}>
+          <Ionicons name={item.icon} size={18} color={disabled ? "#9CA3AF" : stylesVars.inkMuted} />
+        </View>
 
-      <View style={styles.rowText}>
-        <Text style={styles.rowTitle} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text style={styles.rowSubtitle} numberOfLines={1}>
-          {item.subtitle}
-        </Text>
-      </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.rowTitle, disabled && styles.rowTitleDisabled]} numberOfLines={1}>
+            {item.title}
+          </Text>
+          {!!item.subtitle && (
+            <Text style={styles.rowSubtitle} numberOfLines={1}>
+              {item.subtitle}
+            </Text>
+          )}
+        </View>
 
-      {/* No status labels. Keep chevron only for navigable rows. */}
-      {disabled ? null : <Text style={styles.chev}>›</Text>}
+        {!disabled ? <Text style={styles.chev}>›</Text> : null}
+      </View>
+      {!isLast ? <View style={styles.divider} /> : null}
     </TouchableOpacity>
   );
 }
 
-/**
- * All Features (Phase 2 Stage 1)
- * - Calm discovery surface
- * - Non-editable
- * - No status labels ("Live now" / "Coming soon")
- * - Childcare Coverage is visible but disabled (concept only)
- */
 export default function AllFeaturesScreen() {
-  // This screen is accessed from HomeStack, but tab switching must route through the parent tab navigator.
-  const navigation = useNavigation<BottomTabNavigationProp<any>>();
+  const navigation = useNavigation<any>();
 
-  const features = useMemo(() => {
-    const core: FeatureItem[] = [
-      {
-        id: "calendar",
-        title: "Calendar",
-        subtitle: "Your shared schedule",
-        icon: "calendar-outline",
-        action: { kind: "tab", tab: "Calendar" },
-      },
-      {
-        id: "messages",
-        title: "Messages",
-        subtitle: "Family chats and planning",
-        icon: "chatbubble-ellipses-outline",
-        action: { kind: "tab", tab: "Messages" },
-      },
-      {
-        id: "bills",
-        title: "Bills",
-        subtitle: "Keep your family’s bills synchronised",
-        icon: "receipt-outline",
-        action: { kind: "route", route: "Bills" },
-      },
-      {
-        id: "birthdays",
-        title: "Birthdays",
-        subtitle: "Track upcoming birthdays",
-        icon: "gift-outline",
-        action: { kind: "route", route: "Birthdays" },
-      },
-      {
-        id: "family",
-        title: "Family",
-        subtitle: "Family & members",
-        icon: "people-outline",
-        // NOTE: We intentionally do NOT list "Settings" as a feature.
-        // Family is a destination within the Settings tab's stack.
-        action: { kind: "tab", tab: "Settings", params: { screen: "FamilyMembers" } as any },
-      },
-    ];
-
-    const planning: FeatureItem[] = [
-      {
-        id: "tasks",
-        title: "Tasks",
-        subtitle: "Shared to-dos",
-        icon: "checkmark-done-outline",
-        action: { kind: "disabled" },
-      },
-      {
-        id: "meals",
-        title: "Meal planner",
-        subtitle: "Weekly visibility, simple entries",
-        icon: "restaurant-outline",
-        action: { kind: "disabled" },
-      },
-      {
-        id: "childcare",
-        title: "Childcare coverage",
-        subtitle: "Coordinate childcare responsibilities",
-        icon: "people-outline",
-        action: { kind: "disabled" },
-      },
-    ];
-
-    return { core, planning };
-  }, []);
-
-  const switchTab = (tab: keyof MainTabParamList, params?: any) => {
-    const parent = (navigation as any).getParent?.();
+  const goToTab = (tab: "Home" | "Calendar" | "Messages" | "Settings", screen?: string) => {
+    const parent = navigation.getParent?.();
     if (parent && typeof parent.navigate === "function") {
-      parent.navigate(tab, params);
+      if (screen) parent.navigate(tab, { screen });
+      else parent.navigate(tab);
       return;
     }
-    (navigation as any).navigate(tab, params);
+    // Fallback
+    if (screen) navigation.navigate(tab, { screen });
+    else navigation.navigate(tab);
   };
 
-  const onPressItem = (item: FeatureItem) => {
+  const goToRoute = (route: string) => {
+    navigation.navigate(route);
+  };
+
+  const onItemPress = (item: FeatureItem) => {
+    if (item.action.kind === "none") return;
     if (item.action.kind === "tab") {
-      switchTab(item.action.tab, (item.action as any).params);
+      goToTab(item.action.tab, item.action.screen);
       return;
     }
     if (item.action.kind === "route") {
-      (navigation as any).navigate(item.action.route);
+      goToRoute(item.action.route);
       return;
     }
-
-    Alert.alert("Not available yet", "This feature will be added in a later phase.");
   };
 
   return (
@@ -180,25 +230,27 @@ export default function AllFeaturesScreen() {
           All the apps to keep your family in sync.
         </Text>
 
-        <SectionTitle>Core</SectionTitle>
-        <View style={styles.card}>
-          {features.core.map((it, idx) => (
-            <View key={it.id}>
-              <Row item={it} onPress={() => onPressItem(it)} />
-              {idx < features.core.length - 1 ? <View style={styles.divider} /> : null}
-            </View>
+        <Section title="Features">
+          {LIVE_FEATURES.map((item, idx) => (
+            <Row
+              key={item.id}
+              item={item}
+              onPress={() => onItemPress(item)}
+              isLast={idx === LIVE_FEATURES.length - 1}
+            />
           ))}
-        </View>
+        </Section>
 
-        <SectionTitle>Planning</SectionTitle>
-        <View style={styles.card}>
-          {features.planning.map((it, idx) => (
-            <View key={it.id}>
-              <Row item={it} onPress={() => onPressItem(it)} />
-              {idx < features.planning.length - 1 ? <View style={styles.divider} /> : null}
-            </View>
+        <Section title="Coming soon">
+          {COMING_SOON.map((item, idx) => (
+            <Row
+              key={item.id}
+              item={item}
+              onPress={() => onItemPress(item)}
+              isLast={idx === COMING_SOON.length - 1}
+            />
           ))}
-        </View>
+        </Section>
 
         <View style={{ height: 18 }} />
       </ScrollView>
@@ -207,14 +259,15 @@ export default function AllFeaturesScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: stylesVars.bg },
-
-  container: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 22,
+  safe: {
+    flex: 1,
+    backgroundColor: stylesVars.bg,
   },
-
+  container: {
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 18,
+  },
   title: {
     fontSize: 26,
     lineHeight: 32,
@@ -225,20 +278,22 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 13,
     lineHeight: 16,
-    fontWeight: "700",
+    fontWeight: "600",
     color: stylesVars.inkMuted,
     marginBottom: 14,
   },
 
+  section: {
+    marginTop: 14,
+  },
   sectionTitle: {
-    marginTop: 12,
-    marginBottom: 8,
-    fontSize: 13,
-    lineHeight: 16,
+    fontSize: 12,
+    lineHeight: 15,
     fontWeight: "800",
     color: stylesVars.inkMuted,
     textTransform: "uppercase",
     letterSpacing: 0.6,
+    marginBottom: 8,
   },
 
   card: {
@@ -256,54 +311,50 @@ const styles = StyleSheet.create({
       : { elevation: 1 }),
   },
 
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: stylesVars.border,
-    marginLeft: 52,
+  rowPress: {},
+  rowDisabled: {
+    opacity: 0.72,
   },
-
   row: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 12,
     gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
   },
-  rowDisabled: {
-    opacity: 0.45,
+  rowLast: {},
+  divider: {
+    height: 1,
+    backgroundColor: "rgba(238,240,245,0.9)",
+    marginLeft: 48,
   },
 
-  rowIcon: {
+  iconWrap: {
     width: 28,
-    height: 28,
-    borderRadius: 10,
-    backgroundColor: "rgba(245,246,248,0.9)",
     alignItems: "center",
-    justifyContent: "center",
   },
 
-  rowText: {
-    flex: 1,
-    paddingRight: 6,
-  },
   rowTitle: {
     fontSize: 15,
     lineHeight: 18,
     fontWeight: "800",
     color: stylesVars.ink,
   },
+  rowTitleDisabled: {
+    color: "#4B5563",
+  },
   rowSubtitle: {
     marginTop: 3,
     fontSize: 12,
-    lineHeight: 14,
-    fontWeight: "700",
+    lineHeight: 15,
+    fontWeight: "600",
     color: stylesVars.inkMuted,
   },
 
   chev: {
     fontSize: 22,
     color: "#9CA3AF",
-    marginTop: -2,
     marginLeft: 6,
+    marginTop: -2,
   },
 });
