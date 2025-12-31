@@ -14,7 +14,11 @@ type TodayItem = {
   subtitle?: string;
 };
 
-type ShortcutAction = { kind: "tab"; tab: keyof MainTabParamList } | { kind: "comingSoon" };
+type ShortcutAction =
+  | { kind: "tab"; tab: keyof MainTabParamList }
+  | { kind: "navigate"; route: "Bills" }
+  | { kind: "comingSoon" };
+
 
 type ShortcutItem = {
   id: string;
@@ -53,7 +57,7 @@ const SHORTCUTS: ShortcutItem[] = [
   // Birthdays has an actual Phase 1 screen under HomeStack
   { id: "s4", icon: "gift-outline", label: "Birthdays", action: { kind: "comingSoon" } },
   { id: "s5", icon: "people-outline", label: "Family", action: { kind: "tab", tab: "Settings" } },
-  { id: "s6", icon: "receipt-outline", label: "Bills", action: { kind: "tab", tab: "Bills" } },
+  { id: "s6", icon: "receipt-outline", label: "Bills", action: { kind: "navigate", route: "Bills" } },
 ];
 
 export default function HomeScreen() {
