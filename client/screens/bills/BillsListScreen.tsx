@@ -1,4 +1,4 @@
-/** FS PATCH: Bills UI polish — per-bill tiles + stats + add-tile (UI-only) */
+/** FS PATCH: Bills list UI — Next up/A–Z sort + next reminder (In X days) + tile date badges + empty add-card (UI-only) */
 import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import {
   View,
@@ -18,6 +18,8 @@ import { listBills, type BillRow } from "../../data/billsStore";
 
 type Nav = NativeStackNavigationProp<BillsStackParamList>;
 
+type SortMode = "next" | "az";
+
 function formatGBP(amount: number) {
   const n = Number.isFinite(amount) ? amount : 0;
   const v = Math.round(n * 100) / 100;
@@ -25,8 +27,50 @@ function formatGBP(amount: number) {
 }
 
 function formatDateShort(d: Date) {
-  // Locale-aware, short + readable
   return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+}
+
+function daysBetweenUtc(a: Date, b: Date) {
+  const a0 = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
+  const b0 = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
+  return Math.round((b0 - a0) / (1000 * 60 * 60 * 24));
+}
+
+function parseISODateMaybe(value: any): Date | null {
+  if (!value) return null;
+  const d = new Date(String(value));
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function getBillPrimaryDate(item: any): { kind: "renews" | "expires"; date: Date } | null {
+  const auto = Boolean(item?.auto_renew ?? item?.autoRenew ?? false);
+  const renewal = parseISODateMaybe(item?.renewal_date ?? item?.renewalDate);
+  const expiry = parseISODateMaybe(item?.expiry_date ?? item?.expiryDate);
+
+  if (auto && renewal) return { kind: "renews", date: renewal };
+  if (!auto && expiry) return { kind: "expires", date: expiry };
+
+  if (renewal) return { kind: "renews", date: renewal };
+  if (expiry) return { kind: "expires", date: expiry };
+
+  return null;
+}
+
+function getReminderDate(item: any): Date | null {
+  const enabled = Boolean(item?.reminder_enabled ?? item?.reminderEnabled ?? false);
+  if (!enabled) return null;
+
+  const days = Number(item?.reminder_days_before ?? item?.reminderDaysBefore ?? 7);
+  const safeDays = Number.isFinite(days) && days > 0 ? days : 7;
+
+  const primary = getBillPrimaryDate(item);
+  if (!primary) return null;
+
+  const d = new Date(primary.date);
+  d.setDate(d.getDate() - safeDays);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
 }
 
 export default function BillsListScreen() {
@@ -35,6 +79,7 @@ export default function BillsListScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [items, setItems] = useState<BillRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>("next");
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -42,7 +87,6 @@ export default function BillsListScreen() {
       const next = await listBills();
       setItems(Array.isArray(next) ? next : []);
     } catch (e: any) {
-      // Don't wipe existing bills on transient errors
       setLoadError(e?.message ?? "Failed to load bills.");
     } finally {
       setLoading(false);
@@ -77,44 +121,117 @@ export default function BillsListScreen() {
     load();
   }, [load]);
 
-  const { nextReminderLabel, nextReminderRaw } = useMemo(() => {
-    const reminderDates = items
-      .map((i: any) => i.reminderAt)
-      .filter(Boolean)
-      .map((s: string) => new Date(s))
-      .filter((d: Date) => !Number.isNaN(d.getTime()))
-      .sort((a: Date, b: Date) => a.getTime() - b.getTime());
+  const itemsSorted = useMemo(() => {
+    const base = [...items];
 
-    if (!reminderDates.length) return { nextReminderLabel: "None set", nextReminderRaw: null as Date | null };
+    if (sortMode === "az") {
+      base.sort((a: any, b: any) =>
+        String(a?.name ?? "").localeCompare(String(b?.name ?? ""), undefined, { sensitivity: "base" })
+      );
+      return base;
+    }
 
-    const d = reminderDates[0];
-    return { nextReminderLabel: formatDateShort(d), nextReminderRaw: d };
+    base.sort((a: any, b: any) => {
+      const ra = getReminderDate(a);
+      const rb = getReminderDate(b);
+      const ta = ra ? ra.getTime() : Number.POSITIVE_INFINITY;
+      const tb = rb ? rb.getTime() : Number.POSITIVE_INFINITY;
+      if (ta !== tb) return ta - tb;
+
+      const da = getBillPrimaryDate(a)?.date;
+      const db = getBillPrimaryDate(b)?.date;
+      const tda = da ? da.getTime() : Number.POSITIVE_INFINITY;
+      const tdb = db ? db.getTime() : Number.POSITIVE_INFINITY;
+      if (tda !== tdb) return tda - tdb;
+
+      return String(a?.name ?? "").localeCompare(String(b?.name ?? ""), undefined, { sensitivity: "base" });
+    });
+
+    return base;
+  }, [items, sortMode]);
+
+  const nextReminder = useMemo(() => {
+    const now = new Date();
+    const candidates = items
+      .map((i: any) => getReminderDate(i))
+      .filter(Boolean) as Date[];
+
+    const upcoming = candidates
+      .filter((d) => !Number.isNaN(d.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime());
+
+    if (!upcoming.length) return { primary: "None set", secondary: "" };
+
+    const d = upcoming[0];
+    const diff = daysBetweenUtc(now, d);
+
+    let primary = "";
+    if (diff === 0) primary = "Today";
+    else if (diff === 1) primary = "In 1 day";
+    else if (diff > 1) primary = `In ${diff} days`;
+    else if (diff === -1) primary = "Overdue by 1 day";
+    else primary = `Overdue by ${Math.abs(diff)} days`;
+
+    return { primary, secondary: formatDateShort(d) };
   }, [items]);
 
   const showEmpty = !loading && items.length === 0 && !loadError;
 
   const data = useMemo(() => {
-    if (loading || showEmpty) return [];
-    return [...items, { id: "__add__", name: "" } as any];
-  }, [items, loading, showEmpty]);
+    if (loading) return [];
+    if (showEmpty) return [{ id: "__empty__", name: "" } as any];
+    return [...itemsSorted, { id: "__add__", name: "" } as any];
+  }, [itemsSorted, loading, showEmpty]);
+
+  const SortPill = useMemo(() => {
+    if (showEmpty || loading) return null;
+
+    return (
+      <View style={styles.sortRow}>
+        <View style={styles.sortPill}>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setSortMode("next")}
+            style={[styles.sortItem, sortMode === "next" && styles.sortItemActive]}
+          >
+            <Text style={[styles.sortText, sortMode === "next" && styles.sortTextActive]}>Next up</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setSortMode("az")}
+            style={[styles.sortItem, sortMode === "az" && styles.sortItemActive]}
+          >
+            <Text style={[styles.sortText, sortMode === "az" && styles.sortTextActive]}>A–Z</Text>
+          </TouchableOpacity>
+        </View>
+        <Text style={styles.sortHint} numberOfLines={1}>
+          {sortMode === "next" ? "Sorted by next reminder" : "Sorted alphabetically"}
+        </Text>
+      </View>
+    );
+  }, [loading, showEmpty, sortMode]);
 
   const BillTile = useCallback(
     ({ item }: { item: BillRow }) => {
       const provider = (item as any).provider ?? "";
       const frequency = (item as any).frequency ?? "";
-      const reminderAt = (item as any).reminderAt ? new Date((item as any).reminderAt) : null;
-      const hasReminder = reminderAt && !Number.isNaN(reminderAt.getTime());
+      const reminderAt = getReminderDate(item as any);
+      const primaryDate = getBillPrimaryDate(item as any);
+
+      const dateLabel = primaryDate
+        ? `${primaryDate.kind === "renews" ? "Renews" : "Expires"} ${formatDateShort(primaryDate.date)}`
+        : "";
 
       return (
         <TouchableOpacity
           activeOpacity={0.85}
-          onPress={() => navigation.navigate("BillForm", { mode: "edit", billId: item.id })}
+          onPress={() => navigation.navigate("BillForm", { mode: "edit", billId: (item as any).id })}
           style={styles.tile}
         >
           <View style={styles.tileTop}>
             <View style={{ flex: 1, paddingRight: 10 }}>
               <Text style={styles.tileTitle} numberOfLines={1}>
-                {item.name}
+                {(item as any).name}
               </Text>
 
               {!!provider && (
@@ -128,22 +245,36 @@ export default function BillsListScreen() {
                   {frequency}
                 </Text>
               )}
+
+              {!!dateLabel && (
+                <Text style={styles.tileMeta2} numberOfLines={1}>
+                  {dateLabel}
+                </Text>
+              )}
             </View>
 
             <View style={styles.tileRight}>
               <Text style={styles.tileAmount} numberOfLines={1}>
-                {formatGBP(item.amount)}
+                {formatGBP((item as any).amount)}
               </Text>
               <Ionicons name="chevron-forward" size={18} color={vars.inkMuted} />
             </View>
           </View>
 
-          {hasReminder && (
-            <View style={styles.reminderPill}>
-              <Ionicons name="alarm-outline" size={14} color={vars.inkMuted} />
-              <Text style={styles.reminderText} numberOfLines={1}>
-                Reminder {formatDateShort(reminderAt!)}
-              </Text>
+          {!!reminderAt && (
+            <View style={styles.badgeRow}>
+              <View style={styles.badgePill}>
+                <Ionicons name="alarm-outline" size={14} color={vars.inkMuted} />
+                <Text style={styles.badgeText} numberOfLines={1}>
+                  Reminder on
+                </Text>
+              </View>
+
+              <View style={styles.badgePillLight}>
+                <Text style={styles.badgeTextLight} numberOfLines={1}>
+                  {formatDateShort(reminderAt)}
+                </Text>
+              </View>
             </View>
           )}
         </TouchableOpacity>
@@ -153,14 +284,21 @@ export default function BillsListScreen() {
   );
 
   const AddTile = useCallback(
-    () => (
+    ({ variant }: { variant: "inline" | "empty" }) => (
       <TouchableOpacity
         activeOpacity={0.9}
         onPress={() => navigation.navigate("BillForm", { mode: "create" })}
-        style={[styles.tile, styles.addTile]}
+        style={[styles.tile, styles.addTile, variant === "empty" && styles.addTileEmpty]}
       >
-        <Ionicons name="add-circle-outline" size={20} color={vars.inkMuted} />
-        <Text style={styles.addTileText}>Add bill</Text>
+        <Ionicons name="add-circle-outline" size={22} color={vars.inkMuted} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.addTileText}>Add bill</Text>
+          {variant === "empty" && (
+            <Text style={styles.addTileSub} numberOfLines={2}>
+              Add your household bills to keep everything in sync.
+            </Text>
+          )}
+        </View>
       </TouchableOpacity>
     ),
     [navigation]
@@ -169,22 +307,31 @@ export default function BillsListScreen() {
   return (
     <View style={styles.screen}>
       <Text style={styles.descriptor} numberOfLines={1}>
-        Keep your family’s bills synchronised.
+        Keep your family’s bills synchronised.  •  FS PATCH v2
       </Text>
 
       {!showEmpty && !loading && (
-        <View style={styles.statsRow}>
-          <View style={styles.statBox}>
-            <Text style={styles.statLabel}>Total bills</Text>
-            <Text style={styles.statValue}>{items.length}</Text>
+        <>
+          <View style={styles.statsRow}>
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Total bills</Text>
+              <Text style={styles.statValue}>{items.length}</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statLabel}>Next reminder</Text>
+              <Text style={styles.statValue} numberOfLines={1}>
+                {nextReminder.primary}
+              </Text>
+              {!!nextReminder.secondary && (
+                <Text style={styles.statSubValue} numberOfLines={1}>
+                  {nextReminder.secondary}
+                </Text>
+              )}
+            </View>
           </View>
-          <View style={styles.statBox}>
-            <Text style={styles.statLabel}>Next reminder</Text>
-            <Text style={styles.statValue} numberOfLines={1}>
-              {nextReminderLabel}
-            </Text>
-          </View>
-        </View>
+
+          {SortPill}
+        </>
       )}
 
       {!!loadError && (
@@ -204,24 +351,15 @@ export default function BillsListScreen() {
         <View style={styles.center}>
           <ActivityIndicator />
         </View>
-      ) : showEmpty ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>No bills yet</Text>
-          <Text style={styles.emptyText}>Add your household bills to keep everything in sync.</Text>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate("BillForm", { mode: "create" })}
-            style={styles.emptyCta}
-          >
-            <Ionicons name="add" size={18} color={vars.ink} />
-            <Text style={styles.emptyCtaText}>Add bill</Text>
-          </TouchableOpacity>
-        </View>
       ) : (
         <FlatList
           data={data}
           keyExtractor={(it: any) => it.id}
-          renderItem={({ item }: any) => (item.id === "__add__" ? <AddTile /> : <BillTile item={item} />)}
+          renderItem={({ item }: any) => {
+            if (item.id === "__add__") return <AddTile variant="inline" />;
+            if (item.id === "__empty__") return <AddTile variant="empty" />;
+            return <BillTile item={item} />;
+          }}
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
@@ -251,7 +389,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  statsRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
+  statsRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
   statBox: {
     flex: 1,
     backgroundColor: vars.card,
@@ -259,10 +397,25 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: vars.border,
     paddingVertical: 10,
+    paddingHorizontal: 10,
     alignItems: "center",
   },
   statLabel: { fontSize: 11, fontWeight: "700", color: vars.inkMuted },
   statValue: { marginTop: 2, fontSize: 16, fontWeight: "900", color: vars.ink },
+  statSubValue: { marginTop: 1, fontSize: 12, fontWeight: "800", color: vars.inkMuted },
+
+  sortRow: { marginBottom: 12, alignItems: "center" },
+  sortPill: {
+    flexDirection: "row",
+    backgroundColor: "rgba(17,24,39,0.06)",
+    borderRadius: 999,
+    padding: 3,
+  },
+  sortItem: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999 },
+  sortItemActive: { backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: vars.border },
+  sortText: { fontSize: 12, fontWeight: "900", color: vars.inkMuted },
+  sortTextActive: { color: vars.ink },
+  sortHint: { marginTop: 6, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
@@ -278,7 +431,6 @@ const styles = StyleSheet.create({
 
   listContent: { paddingBottom: 20 },
 
-  // Individual bill "tile" (separate cards, slightly smaller than before)
   tile: {
     backgroundColor: vars.card,
     borderRadius: 16,
@@ -292,13 +444,13 @@ const styles = StyleSheet.create({
   tileTitle: { fontSize: 14, fontWeight: "900", color: vars.ink },
   tileSub: { marginTop: 3, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
   tileMeta: { marginTop: 2, fontSize: 11, fontWeight: "700", color: vars.inkMuted },
+  tileMeta2: { marginTop: 2, fontSize: 11, fontWeight: "800", color: vars.inkMuted },
 
   tileRight: { flexDirection: "row", alignItems: "center", gap: 6 },
   tileAmount: { fontSize: 14, fontWeight: "900", color: vars.ink },
 
-  reminderPill: {
-    marginTop: 10,
-    alignSelf: "flex-start",
+  badgeRow: { marginTop: 10, flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  badgePill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -309,7 +461,16 @@ const styles = StyleSheet.create({
     borderColor: vars.border,
     backgroundColor: "rgba(17,24,39,0.03)",
   },
-  reminderText: { fontSize: 11, fontWeight: "800", color: vars.inkMuted },
+  badgeText: { fontSize: 11, fontWeight: "800", color: vars.inkMuted },
+  badgePillLight: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(17,24,39,0.04)",
+    borderWidth: 1,
+    borderColor: "rgba(17,24,39,0.06)",
+  },
+  badgeTextLight: { fontSize: 11, fontWeight: "900", color: vars.ink },
 
   addTile: {
     borderStyle: "dashed",
@@ -317,34 +478,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
-    gap: 8,
+    gap: 10,
     paddingVertical: 14,
   },
+  addTileEmpty: { paddingVertical: 18, paddingHorizontal: 16 },
   addTileText: { fontSize: 14, fontWeight: "900", color: vars.inkMuted },
-
-  emptyCard: {
-    backgroundColor: vars.card,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: vars.border,
-    padding: 16,
-  },
-  emptyTitle: { fontSize: 16, fontWeight: "900", color: vars.ink, marginBottom: 6 },
-  emptyText: { fontSize: 13, fontWeight: "700", color: vars.inkMuted },
-  emptyCta: {
-    marginTop: 14,
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: vars.border,
-    backgroundColor: "#FFFFFF",
-  },
-  emptyCtaText: { fontSize: 13, fontWeight: "900", color: vars.ink },
+  addTileSub: { marginTop: 4, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
 
   errorCard: {
     backgroundColor: vars.card,
