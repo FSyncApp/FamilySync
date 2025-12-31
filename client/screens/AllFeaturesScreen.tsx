@@ -17,7 +17,7 @@ import { useNavigation } from "@react-navigation/native";
  * Phase 2 Stage 1: navigation + visibility only.
  * - This screen is non-editable.
  * - Some items navigate to existing surfaces.
- * - "Coming soon" items are visible but inert.
+ * - Planned items are visible (and may be inert until built).
  */
 
 type Action =
@@ -42,7 +42,7 @@ const stylesVars = {
   inkMuted: "#6B7280",
 };
 
-const LIVE_FEATURES: FeatureItem[] = [
+const FEATURES: FeatureItem[] = [
   {
     id: "bills",
     title: "Bills",
@@ -78,9 +78,8 @@ const LIVE_FEATURES: FeatureItem[] = [
     icon: "people-outline",
     action: { kind: "tab", tab: "Settings", screen: "FamilyMembers" },
   },
-];
 
-const COMING_SOON: FeatureItem[] = [
+  // Phase 2 planned surfaces (visible now, but inert until built)
   {
     id: "tasks",
     title: "Tasks",
@@ -105,6 +104,9 @@ const COMING_SOON: FeatureItem[] = [
     action: { kind: "none" },
     disabled: true,
   },
+];
+
+const COMING_SOON: FeatureItem[] = [
   {
     id: "vault",
     title: "Vault",
@@ -148,15 +150,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Row({
-  item,
-  onPress,
-  isLast,
-}: {
-  item: FeatureItem;
-  onPress: () => void;
-  isLast: boolean;
-}) {
+function Row({ item, onPress, isLast }: { item: FeatureItem; onPress: () => void; isLast: boolean }) {
   const disabled = !!item.disabled || item.action.kind === "none";
 
   return (
@@ -184,8 +178,11 @@ function Row({
           )}
         </View>
 
-        {!disabled ? <Text style={styles.chev}>›</Text> : null}
+        <View style={styles.accessory}>
+          {!disabled ? <Text style={styles.chev}>›</Text> : null}
+        </View>
       </View>
+
       {!isLast ? <View style={styles.divider} /> : null}
     </TouchableOpacity>
   );
@@ -231,13 +228,8 @@ export default function AllFeaturesScreen() {
         </Text>
 
         <Section title="Features">
-          {LIVE_FEATURES.map((item, idx) => (
-            <Row
-              key={item.id}
-              item={item}
-              onPress={() => onItemPress(item)}
-              isLast={idx === LIVE_FEATURES.length - 1}
-            />
+          {FEATURES.map((item, idx) => (
+            <Row key={item.id} item={item} onPress={() => onItemPress(item)} isLast={idx === FEATURES.length - 1} />
           ))}
         </Section>
 
@@ -334,6 +326,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
+  accessory: {
+    width: 18,
+    alignItems: "flex-end",
+    justifyContent: "center",
+    marginLeft: 6,
+  },
+
   rowTitle: {
     fontSize: 15,
     lineHeight: 18,
@@ -354,7 +353,6 @@ const styles = StyleSheet.create({
   chev: {
     fontSize: 22,
     color: "#9CA3AF",
-    marginLeft: 6,
     marginTop: -2,
   },
 });

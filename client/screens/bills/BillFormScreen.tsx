@@ -105,7 +105,8 @@ export default function BillFormScreen() {
   const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
 
   useEffect(() => {
-    if (!dateISO) {s can’t be active.
+    // If there is no date, reminders can’t be active.
+    if (!dateISO) {
       setReminderEnabled(false);
     }
     if (dateISO) setDateError(null);
