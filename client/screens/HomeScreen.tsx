@@ -190,7 +190,12 @@ export default function HomeScreen() {
       return;
     }
 
-    Alert.alert("Coming soon", `${item.label} is coming in a later phase.`);
+    if (item.action.kind === "navigate") {
+      (navigation as any).navigate(item.action.route);
+      return;
+    }
+
+    Alert.alert("Coming soon", ` is coming in a later phase.`);
   };
 
   return (
