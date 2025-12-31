@@ -16,6 +16,10 @@ export type BillRow = {
   frequency?: string | null;
   expiry_date?: string | null;
   renewal_date?: string | null;
+
+  // Reminders (Phase 2)
+  reminder_enabled?: boolean | null;
+  reminder_days_before?: number | null;
 };
 
 function getDefaultFamilyId(): string {
@@ -67,6 +71,10 @@ export type UpsertBillInput = {
 
   expiry_date?: string | null;
   renewal_date?: string | null;
+
+  // Reminders (Phase 2)
+  reminder_enabled?: boolean | null;
+  reminder_days_before?: number | null;
 };
 
 export async function upsertBill(input: UpsertBillInput): Promise<BillRow> {
@@ -96,6 +104,9 @@ export async function upsertBill(input: UpsertBillInput): Promise<BillRow> {
   if (input.frequency !== undefined) payload.frequency = input.frequency;
   if (input.expiry_date !== undefined) payload.expiry_date = input.expiry_date;
   if (input.renewal_date !== undefined) payload.renewal_date = input.renewal_date;
+
+  if (input.reminder_enabled !== undefined) payload.reminder_enabled = input.reminder_enabled;
+  if (input.reminder_days_before !== undefined) payload.reminder_days_before = input.reminder_days_before;
 
   const { data, error } = await supabase
     .from("bills")

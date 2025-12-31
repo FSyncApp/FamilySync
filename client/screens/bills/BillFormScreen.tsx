@@ -72,6 +72,10 @@ export default function BillFormScreen() {
   const [frequency, setFrequency] = useState<Frequency>("monthly");
   const [dateISO, setDateISO] = useState<string>("");
 
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [reminderDaysBefore, setReminderDaysBefore] = useState<number>(7);
+  const [reminderPreset, setReminderPreset] = useState<"1" | "3" | "7" | "14" | "custom">("7");
+
   const originalRef = useRef<{
     name: string;
     amountText: string;
@@ -81,6 +85,9 @@ export default function BillFormScreen() {
     autoRenewing: boolean;
     frequency: Frequency;
     dateISO: string;
+    reminderEnabled: boolean;
+    reminderDaysBefore: number;
+    reminderPreset: "1" | "3" | "7" | "14" | "custom";
   } | null>(null);
 
   const title = useMemo(() => (mode === "create" ? "Add bill" : "Bill"), [mode]);
@@ -163,6 +170,13 @@ export default function BillFormScreen() {
       const iso = (ar ? (bill as any).renewal_date : (bill as any).expiry_date) ?? "";
       setDateISO(String(iso ?? ""));
 
+      const reEnabled = Boolean((bill as any).reminder_enabled ?? false);
+      const reDays = Number((bill as any).reminder_days_before ?? 7);
+      const safeDays = Number.isFinite(reDays) && reDays > 0 ? reDays : 7;
+      setReminderEnabled(reEnabled);
+      setReminderDaysBefore(safeDays);
+      setReminderPreset((safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14) ? String(safeDays) as any : "custom");
+
       originalRef.current = {
         name: loadedName,
         amountText: loadedAmountText,
@@ -172,6 +186,9 @@ export default function BillFormScreen() {
         autoRenewing: ar,
         frequency: (((bill as any).frequency as Frequency) ?? "monthly") as Frequency,
         dateISO: String(iso ?? ""),
+        reminderEnabled: reEnabled,
+        reminderDaysBefore: safeDays,
+        reminderPreset: (safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14) ? (String(safeDays) as any) : "custom",
       };
 
       setIsEditing(false);
@@ -194,6 +211,17 @@ export default function BillFormScreen() {
 
   const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
 
+  useEffect(() => {
+    if (!dateISO) {
+      // If there is no date, reminders can’t be active.
+      setReminderEnabled(false);
+    }
+  }, [dateISO]);
+
+  const hasDate = !!dateISO;
+  const remindersBlocked = !hasDate;
+  const effectiveReminderEnabled = reminderEnabled && !remindersBlocked;
+
   const onEditPress = () => setIsEditing(true);
 
   const onUndo = () => {
@@ -210,6 +238,9 @@ export default function BillFormScreen() {
     setAutoRenewing(orig.autoRenewing);
     setFrequency(orig.frequency);
     setDateISO(orig.dateISO);
+    setReminderEnabled(orig.reminderEnabled);
+    setReminderDaysBefore(orig.reminderDaysBefore);
+    setReminderPreset(orig.reminderPreset);
     setIsEditing(false);
   };
 
@@ -234,6 +265,8 @@ export default function BillFormScreen() {
         frequency,
         expiry_date: autoRenewing ? null : (dateISO || null),
         renewal_date: autoRenewing ? (dateISO || null) : null,
+        reminder_enabled: reminderEnabled,
+        reminder_days_before: reminderDaysBefore,
       } as any);
 
       if (mode === "create") {
@@ -250,6 +283,9 @@ export default function BillFormScreen() {
         autoRenewing,
         frequency,
         dateISO,
+        reminderEnabled,
+        reminderDaysBefore,
+        reminderPreset,
       };
 
       setIsEditing(false);
@@ -372,6 +408,86 @@ export default function BillFormScreen() {
               editable={isEditing}
               placeholder="dd/mm/yyyy"
             />
+
+            <View style={styles.reminderSection}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Reminders</Text>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => isEditing && hasDate && setReminderEnabled((v) => !v)}
+                  disabled={!isEditing || !hasDate}
+                  style={[
+                    styles.togglePill,
+                    (!isEditing || !hasDate || !effectiveReminderEnabled) && styles.togglePillOff,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.toggleText,
+                      (!isEditing || !hasDate || !effectiveReminderEnabled) && styles.toggleTextOff,
+                    ]}
+                  >
+                    {effectiveReminderEnabled ? "On" : "Off"}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {!hasDate ? (
+                <Text style={styles.helperText}>Set a date above to enable reminders.</Text>
+              ) : (
+                <>
+                  <View style={[styles.reminderChips, !effectiveReminderEnabled && { opacity: 0.45 }]}>
+                    {[
+                      { key: "1", label: "1 day" },
+                      { key: "3", label: "3 days" },
+                      { key: "7", label: "7 days" },
+                      { key: "14", label: "14 days" },
+                      { key: "custom", label: "Custom" },
+                    ].map((opt) => {
+                      const selected = reminderPreset === (opt.key as any);
+                      return (
+                        <TouchableOpacity
+                          key={opt.key}
+                          activeOpacity={0.85}
+                          disabled={!isEditing || !effectiveReminderEnabled}
+                          onPress={() => {
+                            setReminderPreset(opt.key as any);
+                            if (opt.key !== "custom") {
+                              const n = Number(opt.key);
+                              if (Number.isFinite(n)) setReminderDaysBefore(n);
+                            }
+                          }}
+                          style={[styles.chip, selected && styles.chipSelected]}
+                        >
+                          <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+
+                  {reminderPreset === "custom" && (
+                    <View style={[styles.customRow, !effectiveReminderEnabled && { opacity: 0.45 }]}>
+                      <Text style={styles.customLabel}>Days before</Text>
+                      <TextInput
+                        value={String(reminderDaysBefore)}
+                        onChangeText={(t) => {
+                          const v = Number(String(t).replace(/[^0-9]/g, ""));
+                          if (!Number.isFinite(v)) return;
+                          setReminderDaysBefore(Math.max(1, Math.min(365, v)));
+                        }}
+                        keyboardType="number-pad"
+                        editable={isEditing && effectiveReminderEnabled}
+                        style={[styles.customInput, (!isEditing || !effectiveReminderEnabled) && styles.inputDisabled]}
+                      />
+                    </View>
+                  )}
+
+                  <Text style={styles.helperText}>
+                    Reminds you {reminderDaysBefore} day{reminderDaysBefore === 1 ? "" : "s"} before.
+                  </Text>
+                </>
+              )}
+            </View>
           </View>
 
           {mode === "edit" && !!createdLabel && (
@@ -523,6 +639,32 @@ const styles = StyleSheet.create({
   chipSelected: { backgroundColor: vars.ink, borderColor: vars.ink },
   chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
   chipTextSelected: { color: "#FFFFFF" },
+
+
+  reminderSection: { marginTop: 12 },
+  reminderChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
+  helperText: { marginTop: 8, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
+  customRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  customLabel: { fontSize: 12, fontWeight: "800", color: vars.ink },
+  customInput: {
+    width: 92,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: vars.border,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    fontSize: 13,
+    fontWeight: "800",
+    color: vars.ink,
+    textAlign: "center",
+  },
 
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 2 },
   metaText: { fontSize: 12, fontWeight: "700", color: vars.inkMuted },
