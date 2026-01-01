@@ -1,4 +1,4 @@
-/** FS PATCH: Task form v1.2 — 2-line starter chips + assignee (Unassigned/All/Other) + cleaner toggles + notes moved up */
+/** FS PATCH: Task form — fix store import (no useTasksStore), align Assign/Due row, iOS Switch toggles + reminder picker */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -11,17 +11,13 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
-import type { TasksStackParamList } from "../../navigation/TasksStack";
-import { deleteTask, getTaskById, upsertTask } from "../../data/tasksStore";
 import DateField from "../../components/DateField";
-
-type Nav = NativeStackNavigationProp<TasksStackParamList>;
-type Route = { key: string; name: "TaskForm"; params: { id?: string } };
+import { deleteTask, getTaskById, upsertTask } from "../../data/tasksStore";
 
 const vars = {
   bg: "#F5F6F8",
@@ -30,31 +26,33 @@ const vars = {
   ink: "#111827",
   inkMuted: "#6B7280",
   danger: "#DC2626",
+  iosBlue: "#0A84FF",
 };
 
-const STARTER_TASKS = ["Pay invoice", "Call school", "Return parcel", "Pick up meds", "Bins out"];
+const STARTER_TASKS = [
+  "Put bins out",
+  "Book dentist",
+  "Pay council tax",
+  "Call school",
+  "Order prescriptions",
+];
 
-function formatAssigneeLabel(v: string | null | undefined) {
+function formatAssigneeLabel(v: string | null) {
   if (!v) return "Unassigned";
   if (v === "__ALL__") return "All";
-  if (v.startsWith("__OTHER__:")) return v.replace("__OTHER__:", "").trim() || "Other";
+  if (v.startsWith("__OTHER__:")) {
+    const name = v.replace("__OTHER__:", "").trim();
+    return name ? name : "Other…";
+  }
+  if (v === "__OTHER__:") return "Other…";
   return v;
 }
 
-function parseOther(v: string) {
-  if (!v.startsWith("__OTHER__:")) return "";
-  return v.replace("__OTHER__:", "");
-}
-
-function isISODate(v: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(v);
-}
-
 export default function TaskFormScreen() {
-  const navigation = useNavigation<Nav>();
-  const route = useRoute<Route>();
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
 
-  const taskId = route.params?.id;
+  const taskId: string | undefined = route?.params?.taskId;
   const isEdit = !!taskId;
 
   const [loading, setLoading] = useState<boolean>(isEdit);
@@ -63,52 +61,80 @@ export default function TaskFormScreen() {
   const [title, setTitle] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  // Assignee: "" (unassigned) | "__ALL__" | "__OTHER__:Free text"
+  // Assignee: "" (unassigned) | "__ALL__" | "__OTHER__:Free text" | free text
   const [assignedTo, setAssignedTo] = useState<string>("");
+  const [otherName, setOtherName] = useState<string>("");
 
   // Due date stored as YYYY-MM-DD
   const [dueISO, setDueISO] = useState<string | null>(null);
 
-  // Calendar intent (Phase 2: store only)
+  // Intent-only flags
   const [calendarSyncRequested, setCalendarSyncRequested] = useState<boolean>(false);
 
-  // Reminders intent (Phase 2: store only)
+  // Reminder intent
   const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
-  const [reminderDaysBefore, setReminderDaysBefore] = useState<number>(1);
+  const [reminderDaysBefore, setReminderDaysBefore] = useState<number | null>(null);
 
-  // Assignee picker modal
+  // Modals
   const [assigneeOpen, setAssigneeOpen] = useState<boolean>(false);
-  const [otherName, setOtherName] = useState<string>("");
+  const [reminderPickerOpen, setReminderPickerOpen] = useState<boolean>(false);
 
-  const canSave = useMemo(() => title.trim().length > 0, [title]);
+  const reminderOptions = [0, 1, 2, 3, 7, 14];
+
+  const hasDue = !!dueISO;
+
+  const canSave = useMemo(() => {
+    if (saving) return false;
+    if (!title.trim()) return false;
+
+    // If user chose Other, require a name (otherwise treat as unassigned)
+    if (assignedTo === "__OTHER__:" && !otherName.trim()) return true;
+
+    return true;
+  }, [saving, title, assignedTo, otherName]);
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: isEdit ? "Task" : "New task",
+    });
+  }, [navigation, isEdit]);
 
   useEffect(() => {
     let alive = true;
 
-    const run = async () => {
-      if (!isEdit) return;
+    const load = async () => {
+      if (!isEdit || !taskId) return;
+
       try {
-        const row = await getTaskById(taskId!);
+        setLoading(true);
+        const row = await getTaskById(taskId);
         if (!alive) return;
 
         if (!row) {
-          Alert.alert("Not found", "That task no longer exists.", [{ text: "OK", onPress: () => navigation.goBack() }]);
+          Alert.alert("Not found", "This task no longer exists.");
+          navigation.goBack();
           return;
         }
 
-        setTitle(String(row.title ?? ""));
-        setNotes(String(row.notes ?? ""));
+        setTitle(row.title ?? "");
+        setNotes((row.notes as any) ?? "");
 
-        const a = String(row.assigned_to ?? "");
-        setAssignedTo(a);
-        setOtherName(a.startsWith("__OTHER__:") ? parseOther(a) : "");
+        const a = (row.assigned_to as any) ?? "";
+        setAssignedTo(String(a ?? ""));
 
-        const d = row.due_date ? String(row.due_date) : null;
-        setDueISO(d && isISODate(d) ? d : null);
+        // Extract other name if stored as "__OTHER__:Name"
+        if (String(a ?? "").startsWith("__OTHER__:")) {
+          const nm = String(a).replace("__OTHER__:", "");
+          setOtherName(nm);
+        } else {
+          setOtherName("");
+        }
 
-        setCalendarSyncRequested(Boolean(row.calendar_sync_requested));
-        setReminderEnabled(Boolean(row.reminder_enabled));
-        setReminderDaysBefore(typeof row.reminder_days_before === "number" ? row.reminder_days_before : 1);
+        setDueISO((row.due_date as any) ?? null);
+
+        setCalendarSyncRequested(!!row.calendar_sync_requested);
+        setReminderEnabled(!!row.reminder_enabled);
+        setReminderDaysBefore((row.reminder_days_before as any) ?? null);
       } catch (e: any) {
         Alert.alert("Couldn’t load", e?.message ?? "Unknown error");
       } finally {
@@ -116,17 +142,12 @@ export default function TaskFormScreen() {
       }
     };
 
-    run();
+    load();
+
     return () => {
       alive = false;
     };
   }, [isEdit, taskId, navigation]);
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      title: isEdit ? "Task" : "New task",
-    });
-  }, [navigation, isEdit]);
 
   const onBack = useCallback(() => {
     if (saving) return;
@@ -155,6 +176,26 @@ export default function TaskFormScreen() {
     ]);
   }, [navigation, taskId]);
 
+  const openAssignee = useCallback(() => {
+    if (saving) return;
+    setAssigneeOpen(true);
+  }, [saving]);
+
+  const chooseAssignee = useCallback(
+    (value: string) => {
+      setAssignedTo(value);
+
+      if (value === "__OTHER__:") {
+        if (!otherName) setOtherName("");
+      } else {
+        setOtherName("");
+      }
+
+      setAssigneeOpen(false);
+    },
+    [otherName]
+  );
+
   const onSave = useCallback(async () => {
     if (!canSave || saving) return;
 
@@ -165,10 +206,10 @@ export default function TaskFormScreen() {
       assignedTo.trim() === ""
         ? null
         : assignedTo.trim().startsWith("__OTHER__:")
-          ? (otherName.trim() ? `__OTHER__:${otherName.trim()}` : null)
+          ? otherName.trim()
+            ? `__OTHER__:${otherName.trim()}`
+            : null
           : assignedTo.trim();
-
-    const hasDue = !!dueISO;
 
     try {
       setSaving(true);
@@ -179,9 +220,9 @@ export default function TaskFormScreen() {
         notes: notes.trim() ? notes.trim() : null,
         assigned_to: assigned,
         due_date: dueISO ?? null,
-        calendar_sync_requested: hasDue ? calendarSyncRequested : false,
-        reminder_enabled: hasDue ? reminderEnabled : false,
-        reminder_days_before: hasDue && reminderEnabled ? reminderDaysBefore : null,
+        calendar_sync_requested: !!dueISO ? calendarSyncRequested : false,
+        reminder_enabled: !!dueISO ? reminderEnabled : false,
+        reminder_days_before: !!dueISO && reminderEnabled ? reminderDaysBefore : null,
       });
 
       navigation.goBack();
@@ -205,23 +246,42 @@ export default function TaskFormScreen() {
     navigation,
   ]);
 
-  const openAssignee = useCallback(() => {
-    if (saving) return;
-    setAssigneeOpen(true);
-  }, [saving]);
+  const assigneeLabel = useMemo(() => {
+    const v = assignedTo.startsWith("__OTHER__:") ? `__OTHER__:${otherName}` : assignedTo || null;
+    return formatAssigneeLabel(v);
+  }, [assignedTo, otherName]);
 
-  const chooseAssignee = useCallback((value: string) => {
-    setAssignedTo(value);
+  const reminderLabel = useMemo(() => {
+    if (!hasDue || !reminderEnabled) return null;
+    if (reminderDaysBefore === null) return "Pick a reminder…";
+    if (reminderDaysBefore === 0) return "On the day";
+    return `${reminderDaysBefore} day${reminderDaysBefore === 1 ? "" : "s"} before`;
+  }, [hasDue, reminderEnabled, reminderDaysBefore]);
 
-    if (value === "__OTHER__:") {
-      if (!otherName) setOtherName("");
-    } else {
-      setOtherName("");
-    }
-    setAssigneeOpen(false);
-  }, [otherName]);
+  const onToggleReminder = useCallback(
+    (v: boolean) => {
+      if (!hasDue) return;
 
-  const reminderOptions = [0, 1, 2, 3, 7, 14];
+      if (!v) {
+        setReminderEnabled(false);
+        setReminderDaysBefore(null);
+        setReminderPickerOpen(false);
+        return;
+      }
+
+      setReminderEnabled(true);
+      setReminderPickerOpen(true);
+    },
+    [hasDue]
+  );
+
+  const onToggleCalendar = useCallback(
+    (v: boolean) => {
+      if (!hasDue) return;
+      setCalendarSyncRequested(v);
+    },
+    [hasDue]
+  );
 
   if (loading) {
     return (
@@ -231,19 +291,13 @@ export default function TaskFormScreen() {
     );
   }
 
-  const assigneeLabel = formatAssigneeLabel(
-    assignedTo.startsWith("__OTHER__:") ? `__OTHER__:${otherName}` : assignedTo || null
-  );
-
-  const hasDue = !!dueISO;
-
   return (
     <KeyboardAvoidingView
       style={styles.screen}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
       keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
     >
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <View style={styles.card}>
           <Text style={styles.label}>Task</Text>
           <TextInput
@@ -258,7 +312,7 @@ export default function TaskFormScreen() {
 
           {!isEdit && title.trim().length === 0 ? (
             <View style={styles.chipsWrap}>
-<View style={styles.chipsRow}>
+              <View style={styles.chipsRow}>
                 {STARTER_TASKS.map((t) => (
                   <TouchableOpacity key={t} activeOpacity={0.85} style={styles.chip} onPress={() => setTitle(t)}>
                     <Text style={styles.chipText} numberOfLines={1}>
@@ -285,89 +339,82 @@ export default function TaskFormScreen() {
 
           <View style={styles.divider} />
 
-          
-{/* Assign + Due (single row) */}
-<View style={styles.twoColRow}>
-  <View style={styles.col}>
-    <Text style={styles.label}>Assign to</Text>
-    <TouchableOpacity activeOpacity={0.85} onPress={openAssignee} style={styles.selectRow}>
-      <Text style={styles.selectValue} numberOfLines={1}>
-        {assigneeLabel}
-      </Text>
-      <Text style={styles.chev}>›</Text>
-    </TouchableOpacity>
-  
-{assignedTo === "__OTHER__:" ? (
-  <View style={{ marginTop: 10 }}>
-    <TextInput
-      value={otherName}
-      onChangeText={setOtherName}
-      placeholder="Other…"
-      placeholderTextColor="rgba(107,114,128,0.85)"
-      style={styles.input}
-      autoCapitalize="words"
-      returnKeyType="done"
-    />
-  </View>
-) : null}
-</View>
+          {/* Assign + Due (single row, forced equal field heights) */}
+          <View style={styles.twoColRow}>
+            <View style={styles.col}>
+              <Text style={styles.label}>Assign to</Text>
+              <View style={styles.fieldBox}>
+                <TouchableOpacity activeOpacity={0.85} onPress={openAssignee} style={styles.selectRow}>
+                  <Text style={styles.selectValue} numberOfLines={1}>
+                    {assigneeLabel}
+                  </Text>
+                  <Text style={styles.chev}>›</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
 
-  <View style={styles.col}>
-    <Text style={styles.label}>Due date</Text>
-    <View style={styles.dateWrap}>
-      <DateField value={dueISO || undefined} onChange={setDueISO} editable placeholder="dd/mm/yyyy" />
-    </View>
-  </View>
-</View>
+            <View style={styles.col}>
+              <Text style={styles.label}>Due date</Text>
+              <View style={styles.fieldBox}>
+                <DateField value={dueISO || undefined} onChange={setDueISO} editable placeholder="dd/mm/yyyy" />
+              </View>
+            </View>
+          </View>
+
+          {assignedTo === "__OTHER__:" ? (
+            <View style={{ marginTop: 10 }}>
+              <TextInput
+                value={otherName}
+                onChangeText={setOtherName}
+                placeholder="Other…"
+                placeholderTextColor="rgba(107,114,128,0.85)"
+                style={styles.input}
+                autoCapitalize="words"
+                returnKeyType="done"
+              />
+            </View>
+          ) : null}
 
           <View style={styles.divider} />
 
+          {/* Toggles (Switch) */}
           <View style={styles.toggleRow}>
             <Text style={styles.label}>Sync to calendar</Text>
-            <TouchableOpacity
-              activeOpacity={0.85}
+            <Switch
+              value={hasDue ? calendarSyncRequested : false}
+              onValueChange={onToggleCalendar}
               disabled={!hasDue}
-              onPress={() => hasDue && setCalendarSyncRequested((v) => !v)}
-              style={[styles.toggle, hasDue && calendarSyncRequested && styles.toggleOn, !hasDue && styles.toggleDisabled]}
-            >
-              <View style={[styles.toggleKnob, hasDue && calendarSyncRequested && styles.toggleKnobOn]} />
-            </TouchableOpacity>
+              trackColor={{ false: "rgba(209,213,219,0.9)", true: vars.iosBlue }}
+              ios_backgroundColor="rgba(209,213,219,0.9)"
+            />
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.toggleRow}>
-            <Text style={styles.label}>Reminders</Text>
-            <TouchableOpacity
-              activeOpacity={0.85}
+            <Text style={styles.label}>Set reminder</Text>
+            <Switch
+              value={hasDue ? reminderEnabled : false}
+              onValueChange={onToggleReminder}
               disabled={!hasDue}
-              onPress={() => hasDue && setReminderEnabled((v) => !v)}
-              style={[styles.toggle, hasDue && reminderEnabled && styles.toggleOn, !hasDue && styles.toggleDisabled]}
-            >
-              <View style={[styles.toggleKnob, hasDue && reminderEnabled && styles.toggleKnobOn]} />
-            </TouchableOpacity>
+              trackColor={{ false: "rgba(209,213,219,0.9)", true: vars.iosBlue }}
+              ios_backgroundColor="rgba(209,213,219,0.9)"
+            />
           </View>
 
           {hasDue && reminderEnabled ? (
             <View style={{ marginTop: 10 }}>
-              <View style={styles.pillsRow}>
-                {reminderOptions.map((d) => {
-                  const label = d === 0 ? "On the day" : `${d}d before`;
-                  const selected = reminderDaysBefore === d;
-                  return (
-                    <TouchableOpacity
-                      key={String(d)}
-                      activeOpacity={0.85}
-                      onPress={() => setReminderDaysBefore(d)}
-                      style={[styles.pill, selected && styles.pillOn]}
-                    >
-                      <Text style={[styles.pillText, selected && styles.pillTextOn]} numberOfLines={1}>
-                        {label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setReminderPickerOpen(true)}
+                style={styles.reminderSummary}
+              >
+                <Text style={styles.reminderSummaryLabel}>Reminder</Text>
+                <Text style={styles.reminderSummaryValue} numberOfLines={1}>
+                  {reminderLabel}
+                </Text>
+                <Text style={styles.chev}>›</Text>
+              </TouchableOpacity>
             </View>
           ) : null}
 
@@ -385,7 +432,12 @@ export default function TaskFormScreen() {
       </ScrollView>
 
       <View style={styles.bottomBar}>
-        <TouchableOpacity activeOpacity={0.9} onPress={onBack} disabled={saving} style={[styles.bottomBtn, styles.ghostBtn]}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={onBack}
+          disabled={saving}
+          style={[styles.bottomBtn, styles.ghostBtn]}
+        >
           <Text style={styles.ghostText}>Cancel</Text>
         </TouchableOpacity>
 
@@ -399,6 +451,7 @@ export default function TaskFormScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Assignee picker */}
       <Modal visible={assigneeOpen} transparent animationType="fade" onRequestClose={() => setAssigneeOpen(false)}>
         <TouchableOpacity activeOpacity={1} onPress={() => setAssigneeOpen(false)} style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
@@ -416,7 +469,47 @@ export default function TaskFormScreen() {
               <Text style={styles.modalRowText}>Other…</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity activeOpacity={0.85} onPress={() => setAssigneeOpen(false)} style={[styles.modalRow, styles.modalClose]}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setAssigneeOpen(false)}
+              style={[styles.modalRow, styles.modalClose]}
+            >
+              <Text style={[styles.modalRowText, { fontWeight: "800" }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Reminder picker */}
+      <Modal visible={reminderPickerOpen} transparent animationType="fade" onRequestClose={() => setReminderPickerOpen(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setReminderPickerOpen(false)} style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Reminder</Text>
+
+            {reminderOptions.map((d) => {
+              const label = d === 0 ? "On the day" : `${d} day${d === 1 ? "" : "s"} before`;
+              const selected = reminderDaysBefore === d;
+              return (
+                <TouchableOpacity
+                  key={String(d)}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setReminderEnabled(true);
+                    setReminderDaysBefore(d);
+                    setReminderPickerOpen(false);
+                  }}
+                  style={styles.modalRow}
+                >
+                  <Text style={[styles.modalRowText, selected && { fontWeight: "900" }]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => setReminderPickerOpen(false)}
+              style={[styles.modalRow, styles.modalClose]}
+            >
               <Text style={[styles.modalRowText, { fontWeight: "800" }]}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -442,7 +535,6 @@ const styles = StyleSheet.create({
   },
 
   label: { fontSize: 13, fontWeight: "800", color: vars.ink, marginBottom: 8 },
-  helper: { fontSize: 12, fontWeight: "600", color: vars.inkMuted },
 
   input: {
     height: 44,
@@ -456,12 +548,13 @@ const styles = StyleSheet.create({
     color: vars.ink,
   },
 
-  notes: { height: 92, paddingTop: 10 },
+  // Slightly smaller than before to keep single-page feel.
+  notes: { height: 86, paddingTop: 10 },
 
-  divider: { height: 1, backgroundColor: "rgba(238,240,245,0.9)", marginVertical: 10 },
+  divider: { height: 1, backgroundColor: "rgba(238,240,245,0.9)", marginVertical: 12 },
 
   chipsWrap: { marginTop: 10 },
-  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
     paddingHorizontal: 10,
     paddingVertical: 7,
@@ -469,8 +562,14 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(238,240,245,0.9)",
     borderWidth: 1,
     borderColor: "rgba(230,232,238,0.9)",
+    maxWidth: "100%",
   },
   chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
+
+  // Ensure both columns align: same label, same field height.
+  twoColRow: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
+  col: { flex: 1 },
+  fieldBox: { height: 44, justifyContent: "center" },
 
   selectRow: {
     height: 44,
@@ -486,46 +585,21 @@ const styles = StyleSheet.create({
   selectValue: { fontSize: 14, fontWeight: "800", color: vars.ink, flex: 1, paddingRight: 10 },
   chev: { fontSize: 18, fontWeight: "900", color: vars.inkMuted },
 
-
-twoColRow: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
-col: { flex: 1 },
-dateWrap: { marginTop: 0 },
-
   toggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
 
-  toggle: {
-    width: 56,
-    height: 32,
-    borderRadius: 999,
-    backgroundColor: "rgba(229,231,235,0.95)",
-    borderWidth: 1,
-    borderColor: "rgba(209,213,219,0.9)",
-    padding: 3,
-    justifyContent: "center",
-  },
-  toggleOn: { backgroundColor: "rgba(17,24,39,0.9)", borderColor: "rgba(17,24,39,0.9)" },
-  toggleDisabled: { opacity: 0.5 },
-  toggleKnob: {
-    width: 26,
-    height: 26,
-    borderRadius: 999,
-    backgroundColor: "white",
-    alignSelf: "flex-start",
-  },
-  toggleKnobOn: { alignSelf: "flex-end" },
-
-  pillsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
-  pill: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: "rgba(238,240,245,0.9)",
+  reminderSummary: {
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.9)",
     borderWidth: 1,
     borderColor: "rgba(230,232,238,0.9)",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
-  pillOn: { backgroundColor: "rgba(17,24,39,0.9)", borderColor: "rgba(17,24,39,0.9)" },
-  pillText: { fontSize: 12, fontWeight: "800", color: vars.ink },
-  pillTextOn: { color: "white" },
+  reminderSummaryLabel: { fontSize: 12, fontWeight: "900", color: vars.inkMuted, textTransform: "uppercase", letterSpacing: 0.6 },
+  reminderSummaryValue: { flex: 1, fontSize: 14, fontWeight: "800", color: vars.ink },
 
   deleteBtn: {
     height: 42,
