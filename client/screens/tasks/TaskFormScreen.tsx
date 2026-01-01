@@ -1,4 +1,4 @@
-/** FS PATCH: Task form v1.3 — single-row Assign/Due + compact Extras (Calendar/Reminders), keep Notes full-size */
+/** FS PATCH: Task form v1.2 — 2-line starter chips + assignee (Unassigned/All/Other) + cleaner toggles + notes moved up */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -63,7 +63,7 @@ export default function TaskFormScreen() {
   const [title, setTitle] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  // Assignee: null (unassigned) | "__ALL__" | "__OTHER__:Free text"
+  // Assignee: "" (unassigned) | "__ALL__" | "__OTHER__:Free text"
   const [assignedTo, setAssignedTo] = useState<string>("");
 
   // Due date stored as YYYY-MM-DD
@@ -168,6 +168,8 @@ export default function TaskFormScreen() {
           ? (otherName.trim() ? `__OTHER__:${otherName.trim()}` : null)
           : assignedTo.trim();
 
+    const hasDue = !!dueISO;
+
     try {
       setSaving(true);
 
@@ -177,9 +179,9 @@ export default function TaskFormScreen() {
         notes: notes.trim() ? notes.trim() : null,
         assigned_to: assigned,
         due_date: dueISO ?? null,
-        calendar_sync_requested: !!dueISO ? calendarSyncRequested : false,
-        reminder_enabled: !!dueISO ? reminderEnabled : false,
-        reminder_days_before: !!dueISO && reminderEnabled ? reminderDaysBefore : null,
+        calendar_sync_requested: hasDue ? calendarSyncRequested : false,
+        reminder_enabled: hasDue ? reminderEnabled : false,
+        reminder_days_before: hasDue && reminderEnabled ? reminderDaysBefore : null,
       });
 
       navigation.goBack();
@@ -208,19 +210,16 @@ export default function TaskFormScreen() {
     setAssigneeOpen(true);
   }, [saving]);
 
-  const chooseAssignee = useCallback(
-    (value: string) => {
-      setAssignedTo(value);
+  const chooseAssignee = useCallback((value: string) => {
+    setAssignedTo(value);
 
-      if (value === "__OTHER__:") {
-        if (!otherName) setOtherName("");
-      } else {
-        setOtherName("");
-      }
-      setAssigneeOpen(false);
-    },
-    [otherName]
-  );
+    if (value === "__OTHER__:") {
+      if (!otherName) setOtherName("");
+    } else {
+      setOtherName("");
+    }
+    setAssigneeOpen(false);
+  }, [otherName]);
 
   const reminderOptions = [0, 1, 2, 3, 7, 14];
 
@@ -246,7 +245,6 @@ export default function TaskFormScreen() {
     >
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
-          {/* Task */}
           <Text style={styles.label}>Task</Text>
           <TextInput
             value={title}
@@ -258,9 +256,11 @@ export default function TaskFormScreen() {
             returnKeyType="done"
           />
 
-          {/* Quick start (new only, empty title) */}
           {!isEdit && title.trim().length === 0 ? (
             <View style={styles.chipsWrap}>
+              <Text style={styles.helper} numberOfLines={1}>
+                Quick start:
+              </Text>
               <View style={styles.chipsRow}>
                 {STARTER_TASKS.map((t) => (
                   <TouchableOpacity key={t} activeOpacity={0.85} style={styles.chip} onPress={() => setTitle(t)}>
@@ -275,8 +275,7 @@ export default function TaskFormScreen() {
 
           <View style={styles.divider} />
 
-          {/* Notes (kept full-size + moved up for prominence) */}
-          <Text style={styles.label}>Notes (optional)</Text>
+          <Text style={styles.label}>Notes</Text>
           <TextInput
             value={notes}
             onChangeText={setNotes}
@@ -289,115 +288,13 @@ export default function TaskFormScreen() {
 
           <View style={styles.divider} />
 
-          {/* Assign + Due (single row) */}
-          <View style={styles.twoColRow}>
-            <View style={styles.col}>
-              <Text style={styles.label}>Assign to</Text>
-              <View style={styles.fieldWrap}>
-              <TouchableOpacity activeOpacity={0.85} onPress={openAssignee} style={styles.selectRow}>
-                <Text style={styles.selectValue} numberOfLines={1}>
-                  {assigneeLabel}
-                </Text>
-                <Text style={styles.chev}>›</Text>
-              /* Extras (compact) */}
-          <Text style={styles.label}>Extras</Text>
-          <View style={styles.extrasRow}>
-            <View style={[styles.extraPill, !hasDue && styles.extraPillDisabled]}>
-              <Text style={[styles.extraText, !hasDue && styles.extraTextDisabled]} numberOfLines={2}>
-                Sync to{"\n"}calendar
-              </Text>
-              <Switch
-                value={!!hasDue && calendarSyncRequested}
-                onValueChange={(v) => {
-                  if (!hasDue) return;
-                  setCalendarSyncRequested(v);
-                }}
-                disabled={!hasDue}
-                trackColor={{ false: "rgba(209,213,219,0.9)", true: "#0A84FF" }}
-                ios_backgroundColor="rgba(209,213,219,0.9)"
-              />
-            </View>
-
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={() => {
-                if (!hasDue) return;
-                setReminderEnabled(true);
-                setReminderPickerOpen(true);
-              }}
-              style={[styles.extraPill, !hasDue && styles.extraPillDisabled]}
-            >
-              <Text style={[styles.extraText, !hasDue && styles.extraTextDisabled]} numberOfLines={2}>
-                Set{"\n"}reminder
-              </Text>
-              <Switch
-                value={!!hasDue && reminderEnabled}
-                onValueChange={(v) => {
-                  if (!hasDue) return;
-                  if (!v) {
-                    setReminderEnabled(false);
-                    setReminderDaysBefore(null);
-                    return;
-                  }
-                  setReminderEnabled(true);
-                  setReminderPickerOpen(true);
-                }}
-                disabled={!hasDue}
-                trackColor={{ false: "rgba(209,213,219,0.9)", true: "#0A84FF" }}
-                ios_backgroundColor="rgba(209,213,219,0.9)"
-              />
-            </TouchableOpacity>
-          </View>
-
-                    
-
-
-          {/* Reminder picker */}
-          <Modal visible={reminderPickerOpen} transparent animationType="fade" onRequestClose={() => setReminderPickerOpen(false)}>
-            <TouchableOpacity activeOpacity={1} onPress={() => setReminderPickerOpen(false)} style={styles.modalBackdrop}>
-              <View style={styles.modalCard}>
-                <Text style={styles.modalTitle}>Reminder</Text>
-
-                {reminderOptions.map((d) => {
-                  const label = d === 0 ? "On the day" : `${d} day${d === 1 ? "" : "s"} before`;
-                  const selected = (reminderDaysBefore ?? 1) === d;
-                  return (
-                    <TouchableOpacity
-                      key={String(d)}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        setReminderEnabled(true);
-                        setReminderDaysBefore(d);
-                        setReminderPickerOpen(false);
-                      }}
-                      style={styles.modalRow}
-                    >
-                      <Text style={[styles.modalRowText, selected && { fontWeight: "900" }]}>{label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    setReminderPickerOpen(false);
-                  }}
-                  style={[styles.modalRow, styles.modalClose]}
-                >
-                  <Text style={[styles.modalRowText, { fontWeight: "800" }]}>Close</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          </Modal>
-
-          {/* Reminder options (only when enabled) */}
-
-              <Text style={styles.label}>Due date</Text>
-              <View style={styles.fieldWrap}>
-                <DateField value={dueISO || undefined} onChange={setDueISO} editable placeholder="dd/mm/yyyy" />
-              </View>
-            </View>
-          </View>
+          <Text style={styles.label}>Assign to</Text>
+          <TouchableOpacity activeOpacity={0.85} onPress={openAssignee} style={styles.selectRow}>
+            <Text style={styles.selectValue} numberOfLines={1}>
+              {assigneeLabel}
+            </Text>
+            <Text style={styles.chev}>›</Text>
+          </TouchableOpacity>
 
           {assignedTo === "__OTHER__:" ? (
             <View style={{ marginTop: 10 }}>
@@ -415,41 +312,37 @@ export default function TaskFormScreen() {
 
           <View style={styles.divider} />
 
-          {/* Extras (compact) */}
-          <Text style={styles.label}>Extras</Text>
-          <View style={styles.extrasRow}>
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => setCalendarSyncRequested((v) => !v)}
-              style={[
-                styles.extraPill,
-                !hasDue && styles.extraPillDisabled,
-                calendarSyncRequested && styles.extraPillOn,
-              ]}
-            >
-              <Text style={[styles.extraText, calendarSyncRequested && styles.extraTextOn]} numberOfLines={2}>Sync to{"\n"}calendar</Text>
-              <View style={[styles.miniToggle, calendarSyncRequested && styles.miniToggleOn]}>
-                <View style={[styles.miniKnob, calendarSyncRequested && styles.miniKnobOn]} />
-              </View>
-            </TouchableOpacity>
+          <Text style={styles.label}>Due date</Text>
+          <DateField value={dueISO || undefined} onChange={setDueISO} editable placeholder="dd/mm/yyyy" />
 
+          <View style={styles.divider} />
+
+          <View style={styles.toggleRow}>
+            <Text style={styles.label}>Sync to calendar</Text>
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => setReminderEnabled((v) => !v)}
-              style={[
-                styles.extraPill,
-                !hasDue && styles.extraPillDisabled,
-                reminderEnabled && styles.extraPillOn,
-              ]}
+              disabled={!hasDue}
+              onPress={() => hasDue && setCalendarSyncRequested((v) => !v)}
+              style={[styles.toggle, hasDue && calendarSyncRequested && styles.toggleOn, !hasDue && styles.toggleDisabled]}
             >
-              <Text style={[styles.extraText, reminderEnabled && styles.extraTextOn]} numberOfLines={2}>Set{"\n"}reminder</Text>
-              <View style={[styles.miniToggle, reminderEnabled && styles.miniToggleOn]}>
-                <View style={[styles.miniKnob, reminderEnabled && styles.miniKnobOn]} />
-              </View>
+              <View style={[styles.toggleKnob, hasDue && calendarSyncRequested && styles.toggleKnobOn]} />
             </TouchableOpacity>
           </View>
 
-          {/* Reminder options (only when enabled) */}
+          <View style={styles.divider} />
+
+          <View style={styles.toggleRow}>
+            <Text style={styles.label}>Reminders</Text>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              disabled={!hasDue}
+              onPress={() => hasDue && setReminderEnabled((v) => !v)}
+              style={[styles.toggle, hasDue && reminderEnabled && styles.toggleOn, !hasDue && styles.toggleDisabled]}
+            >
+              <View style={[styles.toggleKnob, hasDue && reminderEnabled && styles.toggleKnobOn]} />
+            </TouchableOpacity>
+          </View>
+
           {hasDue && reminderEnabled ? (
             <View style={{ marginTop: 10 }}>
               <View style={styles.pillsRow}>
@@ -474,7 +367,7 @@ export default function TaskFormScreen() {
           ) : null}
 
           {isEdit ? (
-            <View style={{ marginTop: 14 }}>
+            <View style={{ marginTop: 12 }}>
               <TouchableOpacity activeOpacity={0.85} onPress={confirmDelete} style={styles.deleteBtn}>
                 <Ionicons name="trash-outline" size={16} color={vars.danger} />
                 <Text style={styles.deleteText}>Delete task</Text>
@@ -483,16 +376,11 @@ export default function TaskFormScreen() {
           ) : null}
         </View>
 
-        <View style={styles.bottomSpace} />
+        <View style={{ height: 86 }} />
       </ScrollView>
 
       <View style={styles.bottomBar}>
-        <TouchableOpacity
-          activeOpacity={0.9}
-          onPress={onBack}
-          disabled={saving}
-          style={[styles.bottomBtn, styles.ghostBtn]}
-        >
+        <TouchableOpacity activeOpacity={0.9} onPress={onBack} disabled={saving} style={[styles.bottomBtn, styles.ghostBtn]}>
           <Text style={styles.ghostText}>Cancel</Text>
         </TouchableOpacity>
 
@@ -523,11 +411,7 @@ export default function TaskFormScreen() {
               <Text style={styles.modalRowText}>Other…</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => setAssigneeOpen(false)}
-              style={[styles.modalRow, styles.modalClose]}
-            >
+            <TouchableOpacity activeOpacity={0.85} onPress={() => setAssigneeOpen(false)} style={[styles.modalRow, styles.modalClose]}>
               <Text style={[styles.modalRowText, { fontWeight: "800" }]}>Close</Text>
             </TouchableOpacity>
           </View>
@@ -542,11 +426,7 @@ const styles = StyleSheet.create({
   center: { alignItems: "center", justifyContent: "center" },
   loading: { fontSize: 14, fontWeight: "700", color: vars.inkMuted },
 
-  content: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 22,
-  },
+  content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 22 },
 
   card: {
     backgroundColor: vars.card,
@@ -557,6 +437,7 @@ const styles = StyleSheet.create({
   },
 
   label: { fontSize: 13, fontWeight: "800", color: vars.ink, marginBottom: 8 },
+  helper: { fontSize: 12, fontWeight: "600", color: vars.inkMuted },
 
   input: {
     height: 44,
@@ -570,29 +451,21 @@ const styles = StyleSheet.create({
     color: vars.ink,
   },
 
-  notes: { height: 110, paddingTop: 10 },
+  notes: { height: 96, paddingTop: 10 },
 
-  divider: {
-    height: 1,
-    backgroundColor: "rgba(238,240,245,0.9)",
-    marginVertical: 14,
-  },
+  divider: { height: 1, backgroundColor: "rgba(238,240,245,0.9)", marginVertical: 14 },
 
   chipsWrap: { marginTop: 10 },
-  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 },
+  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   chip: {
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 7,
     borderRadius: 999,
     backgroundColor: "rgba(238,240,245,0.9)",
     borderWidth: 1,
     borderColor: "rgba(230,232,238,0.9)",
-    maxWidth: "100%",
   },
   chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
-
-  twoColRow: { flexDirection: "row", gap: 12, alignItems: "stretch" },
-  col: { flex: 1 },
 
   selectRow: {
     height: 44,
@@ -608,33 +481,30 @@ const styles = StyleSheet.create({
   selectValue: { fontSize: 14, fontWeight: "800", color: vars.ink, flex: 1, paddingRight: 10 },
   chev: { fontSize: 18, fontWeight: "900", color: vars.inkMuted },
 
-  extrasRow: { flexDirection: "row", gap: 10 },
-  extraPill: {
-    flex: 1,
-    height: 54,
-    borderRadius: 12,
-    backgroundColor: "rgba(255,255,255,0.9)",
+  toggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+
+  toggle: {
+    width: 56,
+    height: 32,
+    borderRadius: 999,
+    backgroundColor: "rgba(229,231,235,0.95)",
     borderWidth: 1,
-    borderColor: "rgba(230,232,238,0.9)",
-    paddingHorizontal: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    borderColor: "rgba(209,213,219,0.9)",
+    padding: 3,
+    justifyContent: "center",
   },
-  extraPillDisabled: { opacity: 0.55 },
-
-  extraText: { fontSize: 12, lineHeight: 14, fontWeight: "900", color: vars.ink, flex: 1, marginRight: 10 },
-  extraTextDisabled: { color: "rgba(107,114,128,0.85)" },
-
-  reminderSummary: {
-    marginTop: 10,
-    fontSize: 12,
-    lineHeight: 15,
-    fontWeight: "700",
-    color: vars.inkMuted,
+  toggleOn: { backgroundColor: "rgba(17,24,39,0.9)", borderColor: "rgba(17,24,39,0.9)" },
+  toggleDisabled: { opacity: 0.5 },
+  toggleKnob: {
+    width: 26,
+    height: 26,
+    borderRadius: 999,
+    backgroundColor: "white",
+    alignSelf: "flex-start",
   },
+  toggleKnobOn: { alignSelf: "flex-end" },
 
- flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  pillsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
   pill: {
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -643,10 +513,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(230,232,238,0.9)",
   },
-  pillOn: {
-    backgroundColor: "rgba(17,24,39,0.9)",
-    borderColor: "rgba(17,24,39,0.9)",
-  },
+  pillOn: { backgroundColor: "rgba(17,24,39,0.9)", borderColor: "rgba(17,24,39,0.9)" },
   pillText: { fontSize: 12, fontWeight: "800", color: vars.ink },
   pillTextOn: { color: "white" },
 
@@ -662,8 +529,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   deleteText: { fontSize: 13, fontWeight: "900", color: vars.danger },
-
-  bottomSpace: { height: 70 },
 
   bottomBar: {
     position: "absolute",
@@ -689,19 +554,10 @@ const styles = StyleSheet.create({
   bottomBtnDisabled: { opacity: 0.55 },
   bottomText: { fontSize: 14, fontWeight: "900", color: "white" },
 
-  ghostBtn: {
-    backgroundColor: "rgba(255,255,255,0.9)",
-    borderWidth: 1,
-    borderColor: "rgba(230,232,238,0.9)",
-  },
+  ghostBtn: { backgroundColor: "rgba(255,255,255,0.9)", borderWidth: 1, borderColor: "rgba(230,232,238,0.9)" },
   ghostText: { fontSize: 14, fontWeight: "900", color: vars.ink },
 
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.25)",
-    padding: 18,
-    justifyContent: "flex-end",
-  },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.25)", padding: 18, justifyContent: "flex-end" },
   modalCard: {
     backgroundColor: "rgba(255,255,255,0.98)",
     borderRadius: 18,
@@ -719,12 +575,7 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.6,
   },
-  modalRow: {
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(238,240,245,0.9)",
-  },
+  modalRow: { paddingHorizontal: 14, paddingVertical: 12, borderTopWidth: 1, borderTopColor: "rgba(238,240,245,0.9)" },
   modalRowText: { fontSize: 14, fontWeight: "900", color: vars.ink },
   modalClose: { backgroundColor: "rgba(245,246,248,0.8)" },
 });
