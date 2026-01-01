@@ -10,6 +10,10 @@ export type TaskRow = {
   assigned_to?: string | null;
   completed?: boolean | null;
   calendar_sync_requested?: boolean | null;
+  reminder_enabled?: boolean | null;
+  reminder_days_before?: number | null;
+  reminder_enabled?: boolean | null;
+  reminder_days_before?: number | null;
   created_at?: string;
   updated_at?: string;
 };
@@ -57,6 +61,8 @@ export type UpsertTaskInput = {
   assigned_to?: string | null;
   completed?: boolean | null;
   calendar_sync_requested?: boolean | null;
+  reminder_enabled?: boolean | null;
+  reminder_days_before?: number | null;
 };
 
 export async function upsertTask(input: UpsertTaskInput): Promise<TaskRow> {
@@ -77,6 +83,9 @@ export async function upsertTask(input: UpsertTaskInput): Promise<TaskRow> {
   if (input.completed !== undefined) payload.completed = Boolean(input.completed);
   if (input.calendar_sync_requested !== undefined)
     payload.calendar_sync_requested = Boolean(input.calendar_sync_requested);
+
+  if (input.reminder_enabled !== undefined) payload.reminder_enabled = Boolean(input.reminder_enabled);
+  if (input.reminder_days_before !== undefined) payload.reminder_days_before = input.reminder_days_before;
 
   const { data, error } = await supabase
     .from("tasks")

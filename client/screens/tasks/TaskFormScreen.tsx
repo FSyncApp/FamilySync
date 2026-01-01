@@ -1,8 +1,9 @@
-/** FS PATCH: Task form v1 — create/edit with safe delete + due date + assignee + notes + calendar intent flag */
+/** FS PATCH: Task form v1.1 — starter task chips + assignee dropdown (incl Other) + Bills-style date picker + reminders (intent-only) */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -17,9 +18,10 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
 import type { TasksStackParamList } from "../../navigation/TasksStack";
 import { deleteTask, getTaskById, upsertTask } from "../../data/tasksStore";
+import DateField from "../../components/DateField";
 
 type Nav = NativeStackNavigationProp<TasksStackParamList>;
-type Route = { params?: { mode: "create" | "edit"; taskId?: string } };
+type Route = { key: string; name: "TaskForm"; params: { id?: string } };
 
 const vars = {
   bg: "#F5F6F8",
@@ -27,52 +29,73 @@ const vars = {
   border: "rgba(230,232,238,0.75)",
   ink: "#111827",
   inkMuted: "#6B7280",
-  danger: "#B91C1C",
+  danger: "#DC2626",
 };
 
-function isoFromParts(yyyy: string, mm: string, dd: string): string | null {
-  const y = Number(yyyy);
-  const m = Number(mm);
-  const d = Number(dd);
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
-  if (y < 2000 || y > 2100) return null;
-  if (m < 1 || m > 12) return null;
-  if (d < 1 || d > 31) return null;
-  const mm2 = String(m).padStart(2, "0");
-  const dd2 = String(d).padStart(2, "0");
-  return `${y}-${mm2}-${dd2}`;
+const STARTER_TASKS = [
+  "Fix sink",
+  "Pay nursery invoice",
+  "Call school",
+  "Return parcel",
+  "Pick up prescription",
+  "Bins out",
+];
+
+type Member = { id: string; name: string; role: "Adult" | "Child"; tag?: string };
+const FAMILY_MEMBERS: Member[] = [
+  { id: "m1", name: "Mark", role: "Adult", tag: "Admin" },
+  { id: "m2", name: "Partner", role: "Adult" },
+  { id: "m3", name: "Child 1", role: "Child" },
+  { id: "m4", name: "Child 2", role: "Child" },
+];
+
+function formatAssigneeLabel(v: string | null | undefined) {
+  if (!v) return "Unassigned";
+  if (v === "__ALL__") return "All";
+  if (v.startsWith("__OTHER__:")) return v.replace("__OTHER__:", "").trim() || "Other";
+  return v;
 }
 
-function partsFromIso(iso?: string | null) {
-  if (!iso) return { yyyy: "", mm: "", dd: "" };
-  const m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return { yyyy: "", mm: "", dd: "" };
-  return { yyyy: m[1], mm: m[2], dd: m[3] };
+function parseOther(v: string) {
+  if (!v.startsWith("__OTHER__:")) return "";
+  return v.replace("__OTHER__:", "");
+}
+
+function isISODate(v: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
 
 export default function TaskFormScreen() {
   const navigation = useNavigation<Nav>();
-  const route = useRoute() as Route;
+  const route = useRoute<Route>();
 
-  const mode = route?.params?.mode ?? "create";
-  const taskId = route?.params?.taskId;
-
-  const isEdit = mode === "edit" && !!taskId;
+  const taskId = route.params?.id;
+  const isEdit = !!taskId;
 
   const [loading, setLoading] = useState<boolean>(isEdit);
   const [saving, setSaving] = useState<boolean>(false);
 
   const [title, setTitle] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
+
+  // Assignee: null (unassigned) | "__ALL__" | "Name" | "__OTHER__:Free text"
   const [assignedTo, setAssignedTo] = useState<string>("");
 
-  const [dueYYYY, setDueYYYY] = useState<string>("");
-  const [dueMM, setDueMM] = useState<string>("");
-  const [dueDD, setDueDD] = useState<string>("");
+  // Due date stored as YYYY-MM-DD
+  const [dueISO, setDueISO] = useState<string | null>(null);
 
-  const dueISO = useMemo(() => isoFromParts(dueYYYY.trim(), dueMM.trim(), dueDD.trim()), [dueYYYY, dueMM, dueDD]);
-
+  // Calendar intent (Phase 2: store only)
   const [calendarSyncRequested, setCalendarSyncRequested] = useState<boolean>(false);
+
+  // Reminders intent (Phase 2: store only)
+  const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
+  const [reminderDaysBefore, setReminderDaysBefore] = useState<number>(1);
+
+  // Assignee picker modal
+  const [assigneeOpen, setAssigneeOpen] = useState<boolean>(false);
+  const [otherName, setOtherName] = useState<string>("");
+
+  const canSave = useMemo(() => title.trim().length > 0, [title]);
 
   useEffect(() => {
     let alive = true;
@@ -82,25 +105,27 @@ export default function TaskFormScreen() {
       try {
         const row = await getTaskById(taskId!);
         if (!alive) return;
+
         if (!row) {
-          Alert.alert("Not found", "This task no longer exists.");
-          navigation.goBack();
+          Alert.alert("Not found", "That task no longer exists.", [{ text: "OK", onPress: () => navigation.goBack() }]);
           return;
         }
 
-        setTitle(row.title ?? "");
-        setNotes(row.notes ?? "");
-        setAssignedTo(row.assigned_to ?? "");
+        setTitle(String(row.title ?? ""));
+        setNotes(String(row.notes ?? ""));
 
-        const p = partsFromIso(row.due_date ?? null);
-        setDueYYYY(p.yyyy);
-        setDueMM(p.mm);
-        setDueDD(p.dd);
+        const a = String(row.assigned_to ?? "");
+        setAssignedTo(a);
+        setOtherName(a.startsWith("__OTHER__:") ? parseOther(a) : "");
+
+        const d = row.due_date ? String(row.due_date) : null;
+        setDueISO(d && isISODate(d) ? d : null);
 
         setCalendarSyncRequested(Boolean(row.calendar_sync_requested));
+        setReminderEnabled(Boolean(row.reminder_enabled));
+        setReminderDaysBefore(typeof row.reminder_days_before === "number" ? row.reminder_days_before : 1);
       } catch (e: any) {
-        Alert.alert("Couldn’t load", e?.message ?? "Please try again.");
-        navigation.goBack();
+        Alert.alert("Couldn’t load", e?.message ?? "Unknown error");
       } finally {
         if (alive) setLoading(false);
       }
@@ -112,174 +137,271 @@ export default function TaskFormScreen() {
     };
   }, [isEdit, taskId, navigation]);
 
-  const onSave = useCallback(async () => {
-    if (saving) return;
-
-    const t = title.trim();
-    if (!t) {
-      Alert.alert("Task title required", "Please enter a title.");
-      return;
-    }
-
-    const anyDatePart = Boolean(dueYYYY.trim() || dueMM.trim() || dueDD.trim());
-    if (anyDatePart && !dueISO) {
-      Alert.alert("Check the due date", "Enter a full date as YYYY / MM / DD, or clear it.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await upsertTask({
-        id: isEdit ? taskId : undefined,
-        title: t,
-        notes: notes.trim() ? notes.trim() : null,
-        assigned_to: assignedTo.trim() ? assignedTo.trim() : null,
-        due_date: dueISO ?? null,
-        calendar_sync_requested: dueISO ? calendarSyncRequested : false,
-      });
-
-      navigation.goBack();
-    } catch (e: any) {
-      Alert.alert("Couldn’t save", e?.message ?? "Please try again.");
-    } finally {
-      setSaving(false);
-    }
-  }, [saving, title, notes, assignedTo, dueYYYY, dueMM, dueDD, dueISO, calendarSyncRequested, isEdit, taskId, navigation]);
-
   useLayoutEffect(() => {
     navigation.setOptions({
-      title: isEdit ? "Edit task" : "Add task",
-      headerRight: () => (
-        <TouchableOpacity
-          accessibilityRole="button"
-          disabled={saving}
-          onPress={() => onSave()}
-          activeOpacity={0.85}
-          style={[styles.headerBtn, saving && { opacity: 0.7 }]}
-        >
-          <Text style={styles.headerBtnText}>{saving ? "Saving…" : "Save"}</Text>
-        </TouchableOpacity>
-      ),
+      title: isEdit ? "Task" : "New task",
     });
-  }, [navigation, isEdit, saving, onSave]);
+  }, [navigation, isEdit]);
 
-  const onDelete = useCallback(() => {
-    if (!isEdit) return;
+  const onBack = useCallback(() => {
+    if (saving) return;
+    navigation.goBack();
+  }, [navigation, saving]);
 
+  const confirmDelete = useCallback(() => {
     Alert.alert("Delete task?", "This can’t be undone.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Delete",
         style: "destructive",
         onPress: async () => {
+          if (!taskId) return;
           try {
-            await deleteTask(taskId!);
+            setSaving(true);
+            await deleteTask(taskId);
             navigation.goBack();
           } catch (e: any) {
-            Alert.alert("Couldn’t delete", e?.message ?? "Please try again.");
+            Alert.alert("Couldn’t delete", e?.message ?? "Unknown error");
+          } finally {
+            setSaving(false);
           }
         },
       },
     ]);
-  }, [isEdit, taskId, navigation]);
+  }, [navigation, taskId]);
+
+  const onSave = useCallback(async () => {
+    if (!canSave || saving) return;
+
+    const titleTrim = title.trim();
+    if (!titleTrim) return;
+
+    const assigned =
+      assignedTo.trim() === ""
+        ? null
+        : assignedTo.trim().startsWith("__OTHER__:")
+          ? (otherName.trim() ? `__OTHER__:${otherName.trim()}` : null)
+          : assignedTo.trim();
+
+    try {
+      setSaving(true);
+
+      await upsertTask({
+        id: taskId,
+        title: titleTrim,
+        notes: notes.trim() ? notes.trim() : null,
+        assigned_to: assigned,
+        due_date: dueISO ?? null,
+        calendar_sync_requested: !!dueISO ? calendarSyncRequested : false,
+        reminder_enabled: !!dueISO ? reminderEnabled : false,
+        reminder_days_before: !!dueISO && reminderEnabled ? reminderDaysBefore : null,
+      });
+
+      navigation.goBack();
+    } catch (e: any) {
+      Alert.alert("Couldn’t save", e?.message ?? "Unknown error");
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    canSave,
+    saving,
+    taskId,
+    title,
+    notes,
+    assignedTo,
+    otherName,
+    dueISO,
+    calendarSyncRequested,
+    reminderEnabled,
+    reminderDaysBefore,
+    navigation,
+  ]);
+
+  const openAssignee = useCallback(() => {
+    if (saving) return;
+    setAssigneeOpen(true);
+  }, [saving]);
+
+  const chooseAssignee = useCallback((value: string) => {
+    setAssignedTo(value);
+
+    if (value === "__OTHER__:") {
+      // show other input
+      if (!otherName) setOtherName("");
+    } else {
+      setOtherName("");
+    }
+    setAssigneeOpen(false);
+  }, [otherName]);
+
+  const reminderOptions = [0, 1, 2, 3, 7, 14];
 
   if (loading) {
     return (
       <View style={[styles.screen, styles.center]}>
-        <Text style={styles.muted}>Loading…</Text>
+        <Text style={styles.loading}>Loading…</Text>
       </View>
     );
   }
 
+  const assigneeLabel = formatAssigneeLabel(
+    assignedTo.startsWith("__OTHER__:") ? `__OTHER__:${otherName}` : assignedTo || null
+  );
+
+  const hasDue = !!dueISO;
+
   return (
-    <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
+    >
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <View style={styles.card}>
           <Text style={styles.label}>Task</Text>
           <TextInput
             value={title}
             onChangeText={setTitle}
-            placeholder="e.g. Tip run"
+            placeholder="What needs doing?"
             placeholderTextColor="rgba(107,114,128,0.85)"
             style={styles.input}
             autoCapitalize="sentences"
             returnKeyType="done"
           />
 
+          {!isEdit && title.trim().length === 0 ? (
+            <View style={styles.chipsWrap}>
+              <Text style={styles.helper} numberOfLines={1}>
+                Quick start:
+              </Text>
+              <View style={styles.chipsRow}>
+                {STARTER_TASKS.map((t) => (
+                  <TouchableOpacity key={t} activeOpacity={0.85} style={styles.chip} onPress={() => setTitle(t)}>
+                    <Text style={styles.chipText} numberOfLines={1}>
+                      {t}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.divider} />
 
-          <Text style={styles.label}>Assigned to (optional)</Text>
-          <TextInput
-            value={assignedTo}
-            onChangeText={setAssignedTo}
-            placeholder="Type a name (family member or other)"
-            placeholderTextColor="rgba(107,114,128,0.85)"
-            style={styles.input}
-            autoCapitalize="words"
-            returnKeyType="done"
-          />
+          <Text style={styles.label}>Assign to (optional)</Text>
+          <TouchableOpacity activeOpacity={0.85} onPress={openAssignee} style={styles.selectRow}>
+            <Text style={styles.selectValue} numberOfLines={1}>
+              {assigneeLabel}
+            </Text>
+            <Text style={styles.chev}>›</Text>
+          </TouchableOpacity>
+
+          {assignedTo === "__OTHER__:" ? (
+            <View style={{ marginTop: 10 }}>
+              <Text style={styles.helper} numberOfLines={2}>
+                Type a name (or leave blank).
+              </Text>
+              <TextInput
+                value={otherName}
+                onChangeText={setOtherName}
+                placeholder="Other…"
+                placeholderTextColor="rgba(107,114,128,0.85)"
+                style={styles.input}
+                autoCapitalize="words"
+                returnKeyType="done"
+              />
+            </View>
+          ) : null}
 
           <View style={styles.divider} />
 
           <Text style={styles.label}>Due date (optional)</Text>
-          <View style={styles.dateRow}>
-            <TextInput
-              value={dueYYYY}
-              onChangeText={(v) => setDueYYYY(v.replace(/[^0-9]/g, "").slice(0, 4))}
-              placeholder="YYYY"
-              placeholderTextColor="rgba(107,114,128,0.85)"
-              style={[styles.input, styles.datePart, { flex: 1.4 }]}
-              keyboardType="number-pad"
-              returnKeyType="done"
-            />
-            <TextInput
-              value={dueMM}
-              onChangeText={(v) => setDueMM(v.replace(/[^0-9]/g, "").slice(0, 2))}
-              placeholder="MM"
-              placeholderTextColor="rgba(107,114,128,0.85)"
-              style={[styles.input, styles.datePart, { flex: 1 }]}
-              keyboardType="number-pad"
-              returnKeyType="done"
-            />
-            <TextInput
-              value={dueDD}
-              onChangeText={(v) => setDueDD(v.replace(/[^0-9]/g, "").slice(0, 2))}
-              placeholder="DD"
-              placeholderTextColor="rgba(107,114,128,0.85)"
-              style={[styles.input, styles.datePart, { flex: 1 }]}
-              keyboardType="number-pad"
-              returnKeyType="done"
-            />
+          <DateField value={dueISO || undefined} onChange={setDueISO} editable placeholder="dd/mm/yyyy" />
+
+          <View style={styles.divider} />
+
+          <View style={styles.calendarRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Sync to calendar</Text>
+              <Text style={styles.helper} numberOfLines={2}>
+                If enabled, we’ll add this to your calendar once calendar sync is implemented.
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              disabled={!hasDue}
+              onPress={() => hasDue && setCalendarSyncRequested((v) => !v)}
+              style={[
+                styles.toggle,
+                hasDue && calendarSyncRequested && styles.toggleOn,
+                !hasDue && styles.toggleDisabled,
+              ]}
+            >
+              <View style={[styles.toggleKnob, hasDue && calendarSyncRequested && styles.toggleKnobOn]} />
+            </TouchableOpacity>
           </View>
 
-          {dueISO ? (
-            <View style={styles.calendarRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.label}>Calendar</Text>
-                <Text style={styles.helper} numberOfLines={2}>
-                  If enabled, we’ll add this task to your calendar once calendar sync is implemented.
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => setCalendarSyncRequested((v) => !v)}
-                style={[styles.toggle, calendarSyncRequested && styles.toggleOn]}
-                accessibilityRole="button"
-                accessibilityLabel={calendarSyncRequested ? "Calendar sync requested" : "Calendar sync not requested"}
-              >
-                <Ionicons
-                  name={calendarSyncRequested ? "checkmark" : "add"}
-                  size={16}
-                  color={calendarSyncRequested ? "#FFFFFF" : vars.ink}
-                />
-              </TouchableOpacity>
-            </View>
-          ) : (
+          {!hasDue ? (
             <Text style={styles.helper} numberOfLines={2}>
-              Add a due date to enable the calendar option.
+              Add a due date to enable calendar sync.
             </Text>
-          )}
+          ) : null}
+
+          <View style={styles.divider} />
+
+          <View style={styles.calendarRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.label}>Reminders</Text>
+              <Text style={styles.helper} numberOfLines={2}>
+                Save a reminder preference for future notifications.
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              disabled={!hasDue}
+              onPress={() => hasDue && setReminderEnabled((v) => !v)}
+              style={[
+                styles.toggle,
+                hasDue && reminderEnabled && styles.toggleOn,
+                !hasDue && styles.toggleDisabled,
+              ]}
+            >
+              <View style={[styles.toggleKnob, hasDue && reminderEnabled && styles.toggleKnobOn]} />
+            </TouchableOpacity>
+          </View>
+
+          {hasDue && reminderEnabled ? (
+            <View style={{ marginTop: 10 }}>
+              <Text style={styles.helper} numberOfLines={1}>
+                Remind me…
+              </Text>
+              <View style={styles.pillsRow}>
+                {reminderOptions.map((d) => {
+                  const label = d === 0 ? "On the day" : `${d}d before`;
+                  const selected = reminderDaysBefore === d;
+                  return (
+                    <TouchableOpacity
+                      key={String(d)}
+                      activeOpacity={0.85}
+                      onPress={() => setReminderDaysBefore(d)}
+                      style={[styles.pill, selected && styles.pillOn]}
+                    >
+                      <Text style={[styles.pillText, selected && styles.pillTextOn]} numberOfLines={1}>
+                        {label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          ) : !hasDue ? (
+            <Text style={styles.helper} numberOfLines={2}>
+              Add a due date to enable reminders.
+            </Text>
+          ) : null}
 
           <View style={styles.divider} />
 
@@ -291,97 +413,273 @@ export default function TaskFormScreen() {
             placeholderTextColor="rgba(107,114,128,0.85)"
             style={[styles.input, styles.notes]}
             multiline
+            textAlignVertical="top"
           />
+
+          {isEdit ? (
+            <View style={{ marginTop: 12 }}>
+              <TouchableOpacity activeOpacity={0.85} onPress={confirmDelete} style={styles.deleteBtn}>
+                <Ionicons name="trash-outline" size={16} color={vars.danger} />
+                <Text style={styles.deleteText}>Delete task</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
 
-        {isEdit ? (
-          <TouchableOpacity onPress={onDelete} activeOpacity={0.85} style={styles.deleteBtn}>
-            <Ionicons name="trash-outline" size={18} color={vars.danger} />
-            <Text style={styles.deleteText}>Delete task</Text>
-          </TouchableOpacity>
-        ) : null}
-
-        <View style={{ height: 20 }} />
+        <View style={styles.bottomSpace} />
       </ScrollView>
+
+      <View style={styles.bottomBar}>
+        <TouchableOpacity activeOpacity={0.9} onPress={onBack} disabled={saving} style={[styles.bottomBtn, styles.ghostBtn]}>
+          <Text style={styles.ghostText}>Cancel</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={onSave}
+          disabled={!canSave || saving}
+          style={[styles.bottomBtn, (!canSave || saving) && styles.bottomBtnDisabled]}
+        >
+          <Text style={styles.bottomText}>{isEdit ? "Save" : "Add task"}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Modal visible={assigneeOpen} transparent animationType="fade" onRequestClose={() => setAssigneeOpen(false)}>
+        <TouchableOpacity activeOpacity={1} onPress={() => setAssigneeOpen(false)} style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Assign to</Text>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => chooseAssignee("")}
+              style={styles.modalRow}
+            >
+              <Text style={styles.modalRowText}>Unassigned</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => chooseAssignee("__ALL__")}
+              style={styles.modalRow}
+            >
+              <Text style={styles.modalRowText}>All</Text>
+            </TouchableOpacity>
+
+            {FAMILY_MEMBERS.map((m) => (
+              <TouchableOpacity
+                key={m.id}
+                activeOpacity={0.85}
+                onPress={() => chooseAssignee(m.name)}
+                style={styles.modalRow}
+              >
+                <Text style={styles.modalRowText}>{m.name}</Text>
+                <Text style={styles.modalRowMeta}>{m.role}{m.tag ? ` • ${m.tag}` : ""}</Text>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => chooseAssignee("__OTHER__:")}
+              style={styles.modalRow}
+            >
+              <Text style={styles.modalRowText}>Other…</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity activeOpacity={0.85} onPress={() => setAssigneeOpen(false)} style={[styles.modalRow, styles.modalClose]}>
+              <Text style={[styles.modalRowText, { fontWeight: "800" }]}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vars.bg },
-  content: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 22 },
+  center: { alignItems: "center", justifyContent: "center" },
+  loading: { fontSize: 14, fontWeight: "700", color: vars.inkMuted },
+
+  content: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 22,
+  },
 
   card: {
     backgroundColor: vars.card,
     borderWidth: 1,
     borderColor: vars.border,
     borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    padding: 14,
   },
 
-  label: { fontSize: 12, lineHeight: 15, fontWeight: "800", color: vars.inkMuted, marginBottom: 6 },
+  label: { fontSize: 13, fontWeight: "800", color: vars.ink, marginBottom: 8 },
+
+  helper: { fontSize: 12, fontWeight: "600", color: vars.inkMuted },
 
   input: {
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: "700",
-    color: vars.ink,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 14,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.9)",
     borderWidth: 1,
     borderColor: "rgba(230,232,238,0.9)",
-    backgroundColor: "rgba(255,255,255,0.9)",
+    paddingHorizontal: 12,
+    fontSize: 14,
+    fontWeight: "700",
+    color: vars.ink,
   },
 
-  notes: { minHeight: 96, textAlignVertical: "top" },
+  notes: { height: 110, paddingTop: 10 },
 
-  divider: { height: 1, backgroundColor: "rgba(238,240,245,0.9)", marginVertical: 14 },
+  divider: {
+    height: 1,
+    backgroundColor: "rgba(238,240,245,0.9)",
+    marginVertical: 14,
+  },
 
-  dateRow: { flexDirection: "row", gap: 10 },
-  datePart: { textAlign: "center" },
+  chipsWrap: { marginTop: 10 },
+  chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  chip: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(238,240,245,0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(230,232,238,0.9)",
+    maxWidth: "100%",
+  },
+  chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
 
-  helper: { marginTop: 8, fontSize: 12, lineHeight: 16, fontWeight: "600", color: vars.inkMuted },
+  selectRow: {
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(230,232,238,0.9)",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  selectValue: { fontSize: 14, fontWeight: "800", color: vars.ink, flex: 1, paddingRight: 10 },
+  chev: { fontSize: 18, fontWeight: "900", color: vars.inkMuted },
 
-  calendarRow: { marginTop: 12, flexDirection: "row", alignItems: "center", gap: 12 },
+  calendarRow: { flexDirection: "row", alignItems: "center", gap: 12 },
 
   toggle: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
+    width: 56,
+    height: 32,
+    borderRadius: 999,
+    backgroundColor: "rgba(229,231,235,0.95)",
     borderWidth: 1,
-    borderColor: vars.border,
-    backgroundColor: "rgba(255,255,255,0.9)",
-    alignItems: "center",
+    borderColor: "rgba(209,213,219,0.9)",
+    padding: 3,
     justifyContent: "center",
   },
-  toggleOn: { backgroundColor: vars.ink, borderColor: "rgba(17,24,39,0.2)" },
+  toggleOn: { backgroundColor: "rgba(17,24,39,0.9)", borderColor: "rgba(17,24,39,0.9)" },
+  toggleDisabled: { opacity: 0.5 },
+  toggleKnob: {
+    width: 26,
+    height: 26,
+    borderRadius: 999,
+    backgroundColor: "white",
+    alignSelf: "flex-start",
+  },
+  toggleKnobOn: { alignSelf: "flex-end" },
+
+  pillsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  pill: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "rgba(238,240,245,0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(230,232,238,0.9)",
+  },
+  pillOn: {
+    backgroundColor: "rgba(17,24,39,0.9)",
+    borderColor: "rgba(17,24,39,0.9)",
+  },
+  pillText: { fontSize: 12, fontWeight: "800", color: vars.ink },
+  pillTextOn: { color: "white" },
 
   deleteBtn: {
-    marginTop: 12,
+    height: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(220,38,38,0.25)",
+    backgroundColor: "rgba(220,38,38,0.08)",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+  },
+  deleteText: { fontSize: 13, fontWeight: "900", color: vars.danger },
+
+  bottomSpace: { height: 70 },
+
+  bottomBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
     paddingVertical: 12,
+    backgroundColor: "rgba(245,246,248,0.96)",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(230,232,238,0.9)",
+    flexDirection: "row",
+    gap: 10,
+  },
+  bottomBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: "rgba(17,24,39,0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bottomBtnDisabled: { opacity: 0.55 },
+  bottomText: { fontSize: 14, fontWeight: "900", color: "white" },
+
+  ghostBtn: {
+    backgroundColor: "rgba(255,255,255,0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(230,232,238,0.9)",
+  },
+  ghostText: { fontSize: 14, fontWeight: "900", color: vars.ink },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    padding: 18,
+    justifyContent: "flex-end",
+  },
+  modalCard: {
+    backgroundColor: "rgba(255,255,255,0.98)",
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(248,113,113,0.35)",
-    backgroundColor: "rgba(255,255,255,0.65)",
+    borderColor: "rgba(230,232,238,0.9)",
+    paddingVertical: 10,
+    overflow: "hidden",
   },
-  deleteText: { fontSize: 13, lineHeight: 16, fontWeight: "800", color: vars.danger },
-
-  headerBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    borderWidth: 1,
-    borderColor: vars.border,
+  modalTitle: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 13,
+    fontWeight: "900",
+    color: vars.inkMuted,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
   },
-  headerBtnText: { fontSize: 13, lineHeight: 16, fontWeight: "800", color: vars.ink },
-
-  center: { alignItems: "center", justifyContent: "center" },
-  muted: { fontSize: 13, lineHeight: 16, fontWeight: "700", color: vars.inkMuted },
+  modalRow: {
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(238,240,245,0.9)",
+  },
+  modalRowText: { fontSize: 14, fontWeight: "900", color: vars.ink },
+  modalRowMeta: { marginTop: 2, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
+  modalClose: { backgroundColor: "rgba(245,246,248,0.8)" },
 });
