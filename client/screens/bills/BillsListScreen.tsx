@@ -356,21 +356,35 @@ export default function BillsListScreen() {
         <View style={styles.center}>
           <ActivityIndicator />
         </View>
-      ) : showEmpty ? (
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>No bills yet</Text>
-          <Text style={styles.emptyText}>Add your household bills to keep everything in sync.</Text>
-          <TouchableOpacity
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate("BillForm", { mode: "create" })}
-            style={styles.emptyCta}
-          >
-            <Ionicons name="add" size={18} color={vars.ink} />
-            <Text style={styles.emptyCtaText}>Add bill</Text>
-          </TouchableOpacity>
+      )
+      : showEmpty ? (
+        <View style={styles.emptyWrap}>
+          <View style={styles.emptyHero}>
+            <View style={styles.emptyIconWrap}>
+              <Ionicons name="receipt-outline" size={22} color={vars.ink} />
+            </View>
+
+            <Text style={styles.emptyTitle}>No bills yet</Text>
+            <Text style={styles.emptyText}>
+              Add your household bills and keep renewals in one place.
+            </Text>
+
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => navigation.navigate("BillForm", { mode: "create" })}
+              style={styles.emptyPrimaryBtn}
+            >
+              <Ionicons name="add" size={18} color="#FFFFFF" />
+              <Text style={styles.emptyPrimaryText}>Add bill</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.emptyHint}>
+              You can add expiry or renewal dates, and optional reminders.
+            </Text>
+          </View>
         </View>
       ) : (
-        <FlatList
+<FlatList
           data={data}
           keyExtractor={(it: any) => it.id}
           renderItem={({ item }: any) => (item.id === "__add__" ? <AddTile /> : item.id === "__empty__" ? null : <BillTile item={item} />)}
@@ -492,31 +506,49 @@ const styles = StyleSheet.create({
   },
   addTileText: { fontSize: 14, fontWeight: "900", color: vars.inkMuted },
 
-  emptyCard: {
+  emptyWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "flex-start",
+    paddingTop: 14,
+  },
+  emptyHero: {
+    width: "100%",
     backgroundColor: vars.card,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: vars.border,
-    padding: 16,
+    padding: 18,
+    shadowColor: "rgba(17, 24, 39, 0.08)",
+    shadowOpacity: 1,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
   },
-  emptyTitle: { fontSize: 16, fontWeight: "900", color: vars.ink, marginBottom: 6 },
-  emptyText: { fontSize: 13, fontWeight: "700", color: vars.inkMuted },
-  emptyCta: {
-    marginTop: 14,
+  emptyIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: "rgba(17,24,39,0.06)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 12,
+  },
+  emptyTitle: { fontSize: 18, fontWeight: "900", color: vars.ink, marginBottom: 6 },
+  emptyText: { fontSize: 13, fontWeight: "700", color: vars.inkMuted, marginBottom: 14 },
+  emptyPrimaryBtn: {
     alignSelf: "flex-start",
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: vars.border,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: vars.ink,
+    marginBottom: 12,
   },
-  emptyCtaText: { fontSize: 13, fontWeight: "900", color: vars.ink },
-
-  errorCard: {
+  emptyPrimaryText: { fontSize: 13, fontWeight: "900", color: "#FFFFFF" },
+  emptyHint: { fontSize: 12, fontWeight: "700", color: vars.inkMuted },
+errorCard: {
     backgroundColor: vars.card,
     borderRadius: 18,
     borderWidth: 1,
