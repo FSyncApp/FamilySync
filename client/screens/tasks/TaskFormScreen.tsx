@@ -258,10 +258,7 @@ export default function TaskFormScreen() {
 
           {!isEdit && title.trim().length === 0 ? (
             <View style={styles.chipsWrap}>
-              <Text style={styles.helper} numberOfLines={1}>
-                Quick start:
-              </Text>
-              <View style={styles.chipsRow}>
+<View style={styles.chipsRow}>
                 {STARTER_TASKS.map((t) => (
                   <TouchableOpacity key={t} activeOpacity={0.85} style={styles.chip} onPress={() => setTitle(t)}>
                     <Text style={styles.chipText} numberOfLines={1}>
@@ -288,32 +285,40 @@ export default function TaskFormScreen() {
 
           <View style={styles.divider} />
 
-          <Text style={styles.label}>Assign to</Text>
-          <TouchableOpacity activeOpacity={0.85} onPress={openAssignee} style={styles.selectRow}>
-            <Text style={styles.selectValue} numberOfLines={1}>
-              {assigneeLabel}
-            </Text>
-            <Text style={styles.chev}>›</Text>
-          </TouchableOpacity>
+          
+{/* Assign + Due (single row) */}
+<View style={styles.twoColRow}>
+  <View style={styles.col}>
+    <Text style={styles.label}>Assign to</Text>
+    <TouchableOpacity activeOpacity={0.85} onPress={openAssignee} style={styles.selectRow}>
+      <Text style={styles.selectValue} numberOfLines={1}>
+        {assigneeLabel}
+      </Text>
+      <Text style={styles.chev}>›</Text>
+    </TouchableOpacity>
+  
+{assignedTo === "__OTHER__:" ? (
+  <View style={{ marginTop: 10 }}>
+    <TextInput
+      value={otherName}
+      onChangeText={setOtherName}
+      placeholder="Other…"
+      placeholderTextColor="rgba(107,114,128,0.85)"
+      style={styles.input}
+      autoCapitalize="words"
+      returnKeyType="done"
+    />
+  </View>
+) : null}
+</View>
 
-          {assignedTo === "__OTHER__:" ? (
-            <View style={{ marginTop: 10 }}>
-              <TextInput
-                value={otherName}
-                onChangeText={setOtherName}
-                placeholder="Other…"
-                placeholderTextColor="rgba(107,114,128,0.85)"
-                style={styles.input}
-                autoCapitalize="words"
-                returnKeyType="done"
-              />
-            </View>
-          ) : null}
-
-          <View style={styles.divider} />
-
-          <Text style={styles.label}>Due date</Text>
-          <DateField value={dueISO || undefined} onChange={setDueISO} editable placeholder="dd/mm/yyyy" />
+  <View style={styles.col}>
+    <Text style={styles.label}>Due date</Text>
+    <View style={styles.dateWrap}>
+      <DateField value={dueISO || undefined} onChange={setDueISO} editable placeholder="dd/mm/yyyy" />
+    </View>
+  </View>
+</View>
 
           <View style={styles.divider} />
 
@@ -451,9 +456,9 @@ const styles = StyleSheet.create({
     color: vars.ink,
   },
 
-  notes: { height: 96, paddingTop: 10 },
+  notes: { height: 92, paddingTop: 10 },
 
-  divider: { height: 1, backgroundColor: "rgba(238,240,245,0.9)", marginVertical: 14 },
+  divider: { height: 1, backgroundColor: "rgba(238,240,245,0.9)", marginVertical: 10 },
 
   chipsWrap: { marginTop: 10 },
   chipsRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
@@ -480,6 +485,11 @@ const styles = StyleSheet.create({
   },
   selectValue: { fontSize: 14, fontWeight: "800", color: vars.ink, flex: 1, paddingRight: 10 },
   chev: { fontSize: 18, fontWeight: "900", color: vars.inkMuted },
+
+
+twoColRow: { flexDirection: "row", gap: 12, alignItems: "flex-start" },
+col: { flex: 1 },
+dateWrap: { marginTop: 0 },
 
   toggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
 
