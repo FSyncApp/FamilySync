@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { Modal, Platform, StyleSheet, Text, TouchableOpacity, View, ViewStyle, TextStyle } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 
 /**
@@ -8,13 +8,26 @@ import DateTimePicker from "@react-native-community/datetimepicker";
  * - Stores date-only ISO: YYYY-MM-DD
  * - Opens a modal picker on iOS so it never renders below the screen
  * - Uses iOS "inline" (calendar) display (falls back gracefully if unsupported)
+ *
+ * FS NOTE:
+ * This component is used both as a standalone field (with its own label)
+ * and inside compact two-column rows where the label is rendered externally.
+ * If `label` is omitted (or `hideLabel` is true), the internal label spacing is removed
+ * so it visually matches sibling 44px input/select fields.
  */
 type Props = {
-  label: string;
+  label?: string;
   value?: string; // YYYY-MM-DD
-  onChange: (isoDate: string) => void;
+  onChange: (isoDate: string) => void; // pass "" to clear
+  allowClear?: boolean;
   editable?: boolean;
   placeholder?: string;
+
+  // Optional styling hooks for compact layouts.
+  hideLabel?: boolean;
+  wrapStyle?: ViewStyle;
+  fieldStyle?: ViewStyle;
+  textStyle?: TextStyle;
 };
 
 function toISODate(d: Date) {
@@ -42,15 +55,23 @@ export default function DateField({
   onChange,
   editable = true,
   placeholder = "dd/mm/yyyy",
+  hideLabel,
+  wrapStyle,
+  fieldStyle,
+  textStyle,
+  allowClear = true,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [tempDate, setTempDate] = useState<Date>(() => safeDate(value));
 
-  const display = value ? formatUK(value) : "";
+  const display = useMemo(() => (value ? formatUK(value) : ""), [value]);
+
+  // If no label is provided, we default to hiding it (compact mode).
+  const shouldHideLabel = hideLabel ?? !label;
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.label}>{label}</Text>
+    <View style={[styles.wrap, shouldHideLabel && styles.wrapCompact, wrapStyle]}>
+      {!shouldHideLabel ? <Text style={styles.label}>{label}</Text> : null}
 
       <TouchableOpacity
         activeOpacity={0.85}
@@ -59,9 +80,14 @@ export default function DateField({
           setTempDate(safeDate(value));
           setOpen(true);
         }}
-        style={[styles.field, !editable && styles.disabled]}
+        style={[
+          styles.field,
+          shouldHideLabel && styles.fieldCompact,
+          !editable && styles.disabled,
+          fieldStyle,
+        ]}
       >
-        <Text style={[styles.text, !display && styles.placeholder]}>
+        <Text style={[styles.text, shouldHideLabel && styles.textCompact, !display && styles.placeholder, textStyle]}>
           {display || placeholder}
         </Text>
       </TouchableOpacity>
@@ -70,7 +96,16 @@ export default function DateField({
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setOpen(false)}>
           <TouchableOpacity activeOpacity={1} onPress={() => {}} style={styles.sheet}>
             <View style={styles.header}>
-              <Text style={styles.headerText}>{label}</Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setOpen(false)}
+                style={styles.cancelBtn}
+              >
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <Text style={styles.headerText}>{label || "Due date"}</Text>
+
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => {
@@ -83,10 +118,22 @@ export default function DateField({
               </TouchableOpacity>
             </View>
 
+            {allowClear && editable && !!value ? (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  onChange("");
+                  setOpen(false);
+                }}
+                style={styles.clearBtn}
+              >
+                <Text style={styles.clearText}>Remove date</Text>
+              </TouchableOpacity>
+            ) : null}
+
             <DateTimePicker
               value={tempDate}
               mode="date"
-              // iOS calendar-style picker
               display={Platform.OS === "ios" ? "inline" : "default"}
               onChange={(_, selected) => {
                 if (!selected) return;
@@ -108,16 +155,28 @@ export default function DateField({
 }
 
 const styles = StyleSheet.create({
+  // Default (standalone) spacing.
   wrap: { marginBottom: 10 },
   label: { fontSize: 13, fontWeight: "800", marginBottom: 6, color: "#111827" },
 
   field: {
     borderWidth: 1,
     borderRadius: 12,
-    padding: 12,
     borderColor: "#E5E7EB",
     backgroundColor: "#FFFFFF",
+    padding: 12,
   },
+
+  // Compact mode: no external spacing, fixed height, and horizontal padding to match sibling fields.
+  wrapCompact: { marginBottom: 0 },
+  fieldCompact: {
+    height: 44,
+    paddingVertical: 0,
+    paddingHorizontal: 12,
+    justifyContent: "center",
+  },
+  textCompact: { fontWeight: "800" },
+
   disabled: { opacity: 0.5, backgroundColor: "#F3F4F6" },
   text: { fontSize: 14, fontWeight: "700", color: "#111827" },
   placeholder: { color: "#6B7280" },
@@ -139,7 +198,20 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 8,
   },
-  headerText: { fontSize: 14, fontWeight: "900", color: "#111827" },
+  headerText: { flex: 1, textAlign: "center", fontSize: 14, fontWeight: "900", color: "#111827" },
+  cancelBtn: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
+  cancelText: { fontSize: 13, fontWeight: "900", color: "#111827" },
+  clearBtn: {
+    marginTop: 8,
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
+  },
+  clearText: { fontSize: 13, fontWeight: "900", color: "#991B1B" },
   doneBtn: {
     paddingHorizontal: 12,
     paddingVertical: 8,

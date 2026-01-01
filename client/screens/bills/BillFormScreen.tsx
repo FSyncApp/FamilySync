@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -71,6 +72,21 @@ export default function BillFormScreen() {
   const [autoRenewing, setAutoRenewing] = useState(false);
   const [frequency, setFrequency] = useState<Frequency>("monthly");
   const [dateISO, setDateISO] = useState<string>("");
+  const [termISO, setTermISO] = useState<string>("");
+  const [showTermExpiry, setShowTermExpiry] = useState(false);
+
+  function stripTermMarker(raw: string) {
+    const m = raw.match(/\n?\[term_expiry:(\d{4}-\d{2}-\d{2})\]\s*$/);
+    if (!m) return { notes: raw, termISO: "" };
+    return { notes: raw.replace(m[0], "").trimEnd(), termISO: m[1] };
+  }
+
+  function addTermMarker(rawNotes: string, iso: string) {
+    const base = rawNotes.trimEnd();
+    if (!iso) return base;
+    return `${base}${base ? "\n" : ""}[term_expiry:${iso}]`;
+  }
+
 
   const originalRef = useRef<{
     name: string;
@@ -81,6 +97,7 @@ export default function BillFormScreen() {
     autoRenewing: boolean;
     frequency: Frequency;
     dateISO: string;
+    termISO: string;
   } | null>(null);
 
   const title = useMemo(() => (mode === "create" ? "Add bill" : "Bill"), [mode]);
@@ -154,7 +171,11 @@ export default function BillFormScreen() {
 
       setProvider((bill as any).provider ?? "");
       setCategory((bill as any).category ?? "");
-      setNotes((bill as any).notes ?? "");
+      const rawNotes = String((bill as any).notes ?? "");
+      const stripped = stripTermMarker(rawNotes);
+      setNotes(stripped.notes);
+      setTermISO(stripped.termISO);
+      setShowTermExpiry(!!stripped.termISO);
 
       const ar = Boolean((bill as any).auto_renew ?? false);
       setAutoRenewing(ar);
@@ -168,10 +189,11 @@ export default function BillFormScreen() {
         amountText: loadedAmountText,
         provider: (bill as any).provider ?? "",
         category: (bill as any).category ?? "",
-        notes: (bill as any).notes ?? "",
+        notes: stripped.notes,
         autoRenewing: ar,
         frequency: (((bill as any).frequency as Frequency) ?? "monthly") as Frequency,
         dateISO: String(iso ?? ""),
+        termISO: stripped.termISO,
       };
 
       setIsEditing(false);
@@ -210,6 +232,8 @@ export default function BillFormScreen() {
     setAutoRenewing(orig.autoRenewing);
     setFrequency(orig.frequency);
     setDateISO(orig.dateISO);
+    setTermISO(orig.termISO);
+    setShowTermExpiry(!!orig.termISO);
     setIsEditing(false);
   };
 
@@ -229,7 +253,7 @@ export default function BillFormScreen() {
         amount,
         provider: provider.trim(),
         category: category.trim(),
-        notes: notes.trim(),
+        notes: addTermMarker(notes.trim(), termISO),
         auto_renew: autoRenewing,
         frequency,
         expiry_date: autoRenewing ? null : (dateISO || null),
@@ -250,6 +274,7 @@ export default function BillFormScreen() {
         autoRenewing,
         frequency,
         dateISO,
+        termISO,
       };
 
       setIsEditing(false);
@@ -336,42 +361,78 @@ export default function BillFormScreen() {
 
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Auto-renewing</Text>
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => isEditing && setAutoRenewing((v) => !v)}
-                style={[styles.togglePill, (!isEditing || !autoRenewing) && styles.togglePillOff]}
-              >
-                <Text style={[styles.toggleText, (!isEditing || !autoRenewing) && styles.toggleTextOff]}>
-                  {autoRenewing ? "On" : "Off"}
-                </Text>
-              </TouchableOpacity>
+              <Text style={styles.sectionTitle}>Auto-renew</Text>
+
+              <Switch
+                value={autoRenewing}
+                onValueChange={(v) => isEditing && setAutoRenewing(v)}
+                disabled={!isEditing}
+              />
             </View>
 
-            <View style={[styles.freqRow, !autoRenewing && { opacity: 0.45 }]}>
-              {FREQ_OPTIONS.map((opt) => {
-                const selected = frequency === opt.key;
-                return (
+            {autoRenewing ? (
+              <>
+                <View style={styles.freqRow}>
+                  {FREQ_OPTIONS.map((opt) => {
+                    const selected = frequency === opt.key;
+                    return (
+                      <TouchableOpacity
+                        key={opt.key}
+                        activeOpacity={0.85}
+                        disabled={!isEditing}
+                        onPress={() => setFrequency(opt.key)}
+                        style={[styles.chip, selected && styles.chipSelected, !isEditing && styles.inputDisabled]}
+                      >
+                        <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                <DateField
+                  label={dateLabel}
+                  value={dateISO || undefined}
+                  onChange={(v) => {
+                    setDateISO(v);
+                  }}
+                  editable={isEditing}
+                  placeholder="dd/mm/yyyy"
+                />
+
+                {showTermExpiry || !!termISO ? (
+                  <DateField
+                    label="Term expiry"
+                    value={termISO || undefined}
+                    onChange={(v) => {
+                      setTermISO(v);
+                      if (!v) setShowTermExpiry(false);
+                    }}
+                    editable={isEditing}
+                    placeholder="dd/mm/yyyy"
+                  />
+                ) : (
                   <TouchableOpacity
-                    key={opt.key}
                     activeOpacity={0.85}
-                    disabled={!isEditing || !autoRenewing}
-                    onPress={() => setFrequency(opt.key)}
-                    style={[styles.chip, selected && styles.chipSelected]}
+                    disabled={!isEditing}
+                    onPress={() => setShowTermExpiry(true)}
+                    style={[styles.addTermRow, !isEditing && styles.inputDisabled]}
                   >
-                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>
+                    <Ionicons name="add-circle-outline" size={18} color={vars.inkMuted} />
+                    <Text style={styles.addTermText}>Add term expiry</Text>
                   </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <DateField
-              label={dateLabel}
-              value={dateISO || undefined}
-              onChange={setDateISO}
-              editable={isEditing}
-              placeholder="dd/mm/yyyy"
-            />
+                )}
+              </>
+            ) : (
+              <DateField
+                label={dateLabel}
+                value={dateISO || undefined}
+                onChange={(v) => {
+                  setDateISO(v);
+                }}
+                editable={isEditing}
+                placeholder="dd/mm/yyyy"
+              />
+            )}
           </View>
 
           {mode === "edit" && !!createdLabel && (
@@ -393,7 +454,7 @@ export default function BillFormScreen() {
                 disabled={saving}
                 style={[styles.secondaryBtn, saving && styles.primaryBtnDisabled]}
               >
-                <Text style={styles.secondaryText}>Undo</Text>
+                <Text style={styles.secondaryText}>Cancel</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -523,6 +584,20 @@ const styles = StyleSheet.create({
   chipSelected: { backgroundColor: vars.ink, borderColor: vars.ink },
   chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
   chipTextSelected: { color: "#FFFFFF" },
+
+addTermRow: {
+  marginTop: 6,
+  height: 44,
+  borderRadius: 12,
+  borderWidth: 1,
+  borderColor: vars.border,
+  backgroundColor: "#FFFFFF",
+  paddingHorizontal: 12,
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+},
+addTermText: { fontSize: 13, fontWeight: "800", color: vars.inkMuted },
 
   metaRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 2 },
   metaText: { fontSize: 12, fontWeight: "700", color: vars.inkMuted },
