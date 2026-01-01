@@ -37,6 +37,76 @@ function daysBetweenUtc(a?: Date | null, b?: Date | null) {
   return Math.round((b0 - a0) / (1000 * 60 * 60 * 24));
 }
 
+function startOfDayUtc(d: Date) {
+  return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function addDays(d: Date, days: number) {
+  const base = new Date(d);
+  base.setDate(base.getDate() + days);
+  return base;
+}
+
+function addMonths(d: Date, months: number) {
+  const base = new Date(d);
+  const day = base.getDate();
+  base.setMonth(base.getMonth() + months);
+
+  // If we rolled into next month because the original day didn't exist (e.g. 31st),
+  // snap back to last day of previous month.
+  if (base.getDate() !== day) {
+    base.setDate(0);
+  }
+  return base;
+}
+
+function addYears(d: Date, years: number) {
+  const base = new Date(d);
+  base.setFullYear(base.getFullYear() + years);
+  return base;
+}
+
+type FrequencyUnit = "day" | "week" | "month" | "year";
+
+function parseFrequency(raw: any): { unit: FrequencyUnit; step: number } | null {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return null;
+
+  // handle common variants
+  if (s.includes("fortnight")) return { unit: "week", step: 2 };
+  if (s.includes("biweekly") || s.includes("bi-weekly")) return { unit: "week", step: 2 };
+
+  const stepMatch = s.match(/(\d+)\s*(day|week|month|year)/);
+  const step = stepMatch ? Math.max(1, parseInt(stepMatch[1], 10)) : 1;
+
+  if (s.includes("daily") || s.includes("day")) return { unit: "day", step };
+  if (s.includes("weekly") || s.includes("week")) return { unit: "week", step };
+  if (s.includes("monthly") || s.includes("month")) return { unit: "month", step };
+  if (s.includes("yearly") || s.includes("annual") || s.includes("annually") || s.includes("year")) return { unit: "year", step };
+
+  return null;
+}
+
+function rollForwardByFrequency(now: Date, due: Date, freqRaw: any): Date {
+  const freq = parseFrequency(freqRaw);
+  if (!freq) return due;
+
+  // Compare using UTC date to avoid TZ/clock drift.
+  const now0 = startOfDayUtc(now);
+  let cursor = new Date(due);
+  let guard = 0;
+
+  while (startOfDayUtc(cursor) < now0 && guard < 120) {
+    guard += 1;
+    if (freq.unit === "day") cursor = addDays(cursor, freq.step);
+    else if (freq.unit === "week") cursor = addDays(cursor, 7 * freq.step);
+    else if (freq.unit === "month") cursor = addMonths(cursor, freq.step);
+    else cursor = addYears(cursor, freq.step);
+  }
+
+  return cursor;
+}
+
 function formatMoneyGeneric(amount: number) {
   // Intentionally currency-agnostic (no symbol).
   const n = Number.isFinite(amount) ? amount : 0;
@@ -44,10 +114,14 @@ function formatMoneyGeneric(amount: number) {
   return v.toFixed(2);
 }
 
-function getBillPrimaryDate(item: any): { kind: "renews" | "expires"; date: Date } | null {
+function getBillPrimaryDate(item: any, now: Date): { kind: "renews" | "expires"; date: Date } | null {
   const auto = Boolean(item?.auto_renew ?? item?.autoRenew ?? false);
-  const renewal = parseISODateMaybe(item?.renewal_date ?? item?.renewalDate);
-  const expiry = parseISODateMaybe(item?.expiry_date ?? item?.expiryDate);
+  const renewalRaw = parseISODateMaybe(item?.renewal_date ?? item?.renewalDate);
+  const expiryRaw = parseISODateMaybe(item?.expiry_date ?? item?.expiryDate);
+  const frequency = item?.frequency ?? item?.freq ?? "";
+
+  const renewal = renewalRaw && auto ? rollForwardByFrequency(now, renewalRaw, frequency) : renewalRaw;
+  const expiry = expiryRaw;
 
   if (auto && renewal) return { kind: "renews", date: renewal };
   if (!auto && expiry) return { kind: "expires", date: expiry };
@@ -59,13 +133,13 @@ function getBillPrimaryDate(item: any): { kind: "renews" | "expires"; date: Date
   return null;
 }
 
-function getEffectiveDueDate(item: any): Date | null {
+function getEffectiveDueDate(item: any, now: Date): Date | null {
   // "Next up" = primary due date (expiry/renewal). Reminder is secondary and shown separately.
-  return getBillPrimaryDate(item)?.date ?? null;
+  return getBillPrimaryDate(item, now)?.date ?? null;
 }
 
 function isExpiredBill(item: any, now: Date): boolean {
-  const due = getEffectiveDueDate(item);
+  const due = getEffectiveDueDate(item, now);
   const diff = daysBetweenUtc(now, due);
   if (!Number.isFinite(diff)) return false;
   return diff < 0;
@@ -94,6 +168,17 @@ function formatDuePrimary(now: Date, due?: Date | null) {
   if (diff <= 30) return { primary: `In ${diff} days`, secondary: formatDateShort(due) };
   return { primary: formatDateShort(due), secondary: "" };
 }
+
+function formatNextBillWhen(now: Date, due?: Date | null) {
+  if (!due) return "—";
+  const diff = daysBetweenUtc(now, due);
+  if (!Number.isFinite(diff)) return "—";
+  if (diff === 0) return "Today";
+  if (diff === 1) return "In 1 day";
+  if (diff > 1 && diff <= 30) return `In ${diff} days`;
+  return formatDateShort(due);
+}
+
 
 export default function BillsListScreen() {
   const navigation = useNavigation<Nav>();
@@ -162,8 +247,8 @@ export default function BillsListScreen() {
       const bExpired = isExpiredBill(b, now);
       if (aExpired !== bExpired) return aExpired ? 1 : -1;
 
-      const da = getEffectiveDueDate(a);
-      const db = getEffectiveDueDate(b);
+      const da = getEffectiveDueDate(a, now);
+      const db = getEffectiveDueDate(b, now);
       const ta = da ? da.getTime() : Number.POSITIVE_INFINITY;
       const tb = db ? db.getTime() : Number.POSITIVE_INFINITY;
       if (ta !== tb) return ta - tb;
@@ -174,33 +259,12 @@ export default function BillsListScreen() {
     return base;
   }, [items, now, sortMode]);
 
-  const nextUp = useMemo(() => {
-    const upcoming = items
-      .map((it: any) => ({ it, due: getEffectiveDueDate(it) }))
-      .filter((x) => !!x.due && !Number.isNaN((x.due as Date).getTime()))
-      .sort((a, b) => (a.due as Date).getTime() - (b.due as Date).getTime());
-
-    // Prefer not-expired
-    const firstNotExpired = upcoming.find((x) => !isExpiredBill(x.it, now));
-    const pick = firstNotExpired ?? upcoming[0];
-
-    if (!pick) return { line2: "None", line3: "", due: null as Date | null };
-
-    const due = pick.due as Date;
-    const diff = daysBetweenUtc(now, due);
-    const line3 =
-      Number.isFinite(diff) && diff >= 0 && diff <= 30
-        ? (diff === 0 ? "Due today" : diff === 1 ? "Due in 1 day" : `Due in ${diff} days`)
-        : formatDateShort(due);
-
-    return { line2: String((pick.it as any).name ?? "Bill"), line3, due };
-  }, [items, now]);
 
   const stats = useMemo(() => {
     const total = items.length;
 
     const nextDue = items
-      .map((it: any) => ({ it, due: getEffectiveDueDate(it) }))
+      .map((it: any) => ({ it, due: getEffectiveDueDate(it, now) }))
       .filter((x) => !!x.due && !Number.isNaN((x.due as Date).getTime()))
       .filter((x) => !isExpiredBill(x.it, now))
       .sort((a, b) => (a.due as Date).getTime() - (b.due as Date).getTime())[0];
@@ -290,7 +354,7 @@ export default function BillsListScreen() {
 
       const provider = String((item as any).provider ?? "").trim();
       const frequency = String((item as any).frequency ?? "").trim();
-      const primary = getBillPrimaryDate(item);
+      const primary = getBillPrimaryDate(item, now);
       const due = primary?.date ?? null;
 
       const expired = isExpiredBill(item, now);
@@ -352,9 +416,8 @@ export default function BillsListScreen() {
 
   const header = useMemo(() => {
     if (loading) return null;
-
-    const nextDueParts = formatDuePrimary(now, stats.due);
-    const nextDueLabel = stats.label ? stats.label : "—";
+    const nextBillName = stats.label ? stats.label : "None";
+    const nextBillWhen = formatNextBillWhen(now, stats.due);
 
     return (
       <View style={{ marginBottom: 12 }}>
@@ -366,30 +429,18 @@ export default function BillsListScreen() {
           </View>
 
           <View style={styles.statBox}>
-            <Text style={styles.statLabel}>Next due</Text>
-            <Text style={styles.statPrimary}>{nextDueParts.primary}</Text>
+            <Text style={styles.statLabel}>Next bill</Text>
+            <Text style={styles.statPrimary} numberOfLines={1}>{nextBillName}</Text>
             <Text style={styles.statSecondary} numberOfLines={1}>
-              {nextDueLabel}
+              {nextBillWhen}
             </Text>
           </View>
         </View>
 
         {SortPill}
-
-        {!showEmpty && (
-          <View style={styles.nextUpCard}>
-            <Text style={styles.nextUpLine1}>Next up</Text>
-            <Text style={styles.nextUpLine2} numberOfLines={1}>
-              {nextUp.line2}
-            </Text>
-            <Text style={styles.nextUpLine3} numberOfLines={1}>
-              {nextUp.line3}
-            </Text>
-          </View>
-        )}
       </View>
     );
-  }, [SortPill, loading, now, nextUp.line2, nextUp.line3, showEmpty, stats.due, stats.label, stats.total]);
+  }, [SortPill, loading, now, showEmpty, stats.due, stats.label, stats.total]);
 
   if (loading) {
     return (
@@ -454,7 +505,7 @@ const styles = StyleSheet.create({
   statPrimary: { marginTop: 6, fontSize: 18, fontWeight: "900", color: vars.ink },
   statSecondary: { marginTop: 2, fontSize: 12, fontWeight: "800", color: vars.inkMuted },
 
-  sortRow: { marginTop: 6, marginBottom: 10 },
+  sortRow: { marginTop: 6, marginBottom: 10, alignItems: "center" },
   sortPill: {
     flexDirection: "row",
     borderWidth: 1,
@@ -462,13 +513,13 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     overflow: "hidden",
     backgroundColor: vars.card,
-    alignSelf: "flex-start",
+    alignSelf: "center",
   },
   sortItem: { paddingVertical: 8, paddingHorizontal: 12 },
   sortItemActive: { backgroundColor: vars.ink },
   sortText: { fontSize: 12, fontWeight: "900", color: vars.inkMuted },
   sortTextActive: { color: "#FFFFFF" },
-  sortHint: { marginTop: 6, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
+  sortHint: { marginTop: 6, fontSize: 12, fontWeight: "700", color: vars.inkMuted, textAlign: "center" },
 
   nextUpCard: {
     backgroundColor: vars.card,
