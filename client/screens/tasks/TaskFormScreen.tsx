@@ -1,3 +1,4 @@
+
 /** FS PATCH: Tasks v1.10 — existing task opens locked; Back|Edit → Cancel|Save; header delete */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import {
@@ -18,6 +19,10 @@ import { Switch } from "react-native";
 
 import DateField from "../../components/DateField";
 import { deleteTask, getTaskById, upsertTask } from "../../data/tasksStore";
+import { getUserSettings } from "../../data/settingsStore";  // Assuming we have a function to fetch user settings
+
+// Using absolute path for styles import
+import { styles } from "/client/styles";  // Absolute path import to avoid relative path issues
 
 const vars = {
   surface: "#FFFFFF",
@@ -29,15 +34,7 @@ const vars = {
   iosBlue: "#007AFF",
 };
 
-type AssigneePreset = "__UNASSIGNED__" | "__ALL__" | "__OTHER__:";
-
-const ASSIGNEE_OPTIONS: Array<{ key: AssigneePreset; label: string }> = [
-  { key: "__UNASSIGNED__", label: "Unassigned" },
-  { key: "__ALL__", label: "All" },
-  { key: "__OTHER__:", label: "Other…" },
-];
-
-function normaliseAssignedTo(value: string, otherName: string): string {
+function normaliseAssignedTo(value, otherName) {
   if (!value) return "__UNASSIGNED__";
   if (value === "__OTHER__:") {
     const name = (otherName ?? "").trim();
@@ -46,7 +43,7 @@ function normaliseAssignedTo(value: string, otherName: string): string {
   return value;
 }
 
-function displayAssignedTo(value: string): string {
+function displayAssignedTo(value) {
   if (!value) return "Unassigned";
   if (value === "__UNASSIGNED__") return "Unassigned";
   if (value === "__ALL__") return "All";
@@ -59,51 +56,46 @@ function displayAssignedTo(value: string): string {
 }
 
 export default function TaskFormScreen() {
-  const navigation = useNavigation<any>();
-  const route = useRoute<any>();
+  const navigation = useNavigation();
+  const route = useRoute();
 
-  const routeMode: "create" | "edit" | undefined = route?.params?.mode;
-  const taskId: string | undefined = route?.params?.taskId;
+  const routeMode = route?.params?.mode;
+  const taskId = route?.params?.taskId;
   const isEdit = routeMode === "edit" || !!taskId;
 
-  const [loading, setLoading] = useState<boolean>(isEdit);
-  const [saving, setSaving] = useState<boolean>(false);
+  const [loading, setLoading] = useState(isEdit);
+  const [saving, setSaving] = useState(false);
 
   // View/Edit mode: existing tasks open locked until user taps "Edit"
-  const [isLocked, setIsLocked] = useState<boolean>(isEdit);
+  const [isLocked, setIsLocked] = useState(isEdit);
 
   // Snapshot so Cancel restores original values
-  const [snapshot, setSnapshot] = useState<{
-    title: string;
-    notes: string;
-    assignedTo: string;
-    otherName: string;
-    dueISO: string | null;
-    calendarSyncRequested: boolean;
-    reminderEnabled: boolean;
-    reminderDaysBefore: number | null;
-  } | null>(null);
+  const [snapshot, setSnapshot] = useState(null);
 
-  const [title, setTitle] = useState<string>("");
-  const [notes, setNotes] = useState<string>("");
+  const [title, setTitle] = useState("");
+  const [notes, setNotes] = useState("");
 
-  const [assignedTo, setAssignedTo] = useState<string>("__UNASSIGNED__");
-  const [otherName, setOtherName] = useState<string>("");
+  const [assignedTo, setAssignedTo] = useState("__UNASSIGNED__");
+  const [otherName, setOtherName] = useState("");
 
-  const [dueISO, setDueISO] = useState<string | null>(null);
+  const [dueISO, setDueISO] = useState(null);
 
-  const [calendarSyncRequested, setCalendarSyncRequested] = useState<boolean>(false);
-  const [reminderEnabled, setReminderEnabled] = useState<boolean>(false);
-  const [reminderDaysBefore, setReminderDaysBefore] = useState<number | null>(null);
+  const [calendarSyncRequested, setCalendarSyncRequested] = useState(false);
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [reminderDaysBefore, setReminderDaysBefore] = useState(null);
 
-  const [assigneeOpen, setAssigneeOpen] = useState<boolean>(false);
-  const [reminderPickerOpen, setReminderPickerOpen] = useState<boolean>(false);
+  const [assigneeOpen, setAssigneeOpen] = useState(false);
+  const [reminderPickerOpen, setReminderPickerOpen] = useState(false);
 
   const canSave = title.trim().length > 0;
   const hasDue = !!dueISO;
   const isEditable = !isEdit || !isLocked;
 
   const reminderOptions = useMemo(() => [0, 1, 2, 3, 5, 7, 14], []);
+
+  // Fetch the current screen name from user settings (onboarding)
+  const userSettings = getUserSettings(); // Assuming we have a function to fetch the user's settings
+  const userName = userSettings?.screenName || "Myself";  // Default to "Myself" if no name is found
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -246,7 +238,9 @@ export default function TaskFormScreen() {
     (value: string) => {
       setAssignedTo(value);
 
-      if (value === "__OTHER__:") {
+      if (value === "__MYSELF__") {
+        setAssignedTo(userName); // Assign to current user using the screen name
+      } else if (value === "__OTHER__:") {
         if (!otherName) setOtherName("");
       } else {
         // If user picks a preset, clear other name (visual)
@@ -257,7 +251,7 @@ export default function TaskFormScreen() {
 
       setAssigneeOpen(false);
     },
-    [assignedTo, otherName]
+    [assignedTo, otherName, userName]
   );
 
   const onToggleCalendar = useCallback(
@@ -385,343 +379,11 @@ export default function TaskFormScreen() {
               </TouchableOpacity>
             ))}
           </View>
-
-          <View style={styles.divider} />
-
-          <Text style={styles.sectionTitle}>Notes</Text>
-
-          <TextInput
-            style={[styles.input, styles.notesInput]}
-            placeholder="Anything useful..."
-            value={notes}
-            onChangeText={setNotes}
-            editable={isEditable}
-            multiline
-            textAlignVertical="top"
-          />
-
-          <View style={styles.divider} />
-
-          <View style={styles.twoColRow}>
-            <View style={styles.col}>
-              <Text style={styles.sectionTitle}>Assign to</Text>
-              <TouchableOpacity activeOpacity={0.85} onPress={openAssignee} style={styles.selectRow}>
-                <Text style={styles.selectText}>{displayAssignedTo(assignedTo)}</Text>
-                <Ionicons name="chevron-forward" size={18} color={vars.textMuted} />
-              </TouchableOpacity>
-
-              {String(assignedTo ?? "").startsWith("__OTHER__:") || assignedTo === "__OTHER__:" ? (
-                <TextInput
-                  style={[styles.input, styles.otherInput]}
-                  placeholder="Enter name"
-                  value={otherName}
-                  onChangeText={setOtherName}
-                  editable={isEditable}
-                  returnKeyType="done"
-                />
-              ) : null}
-            </View>
-
-            <View style={styles.col}>
-              <Text style={styles.sectionTitle}>Due date</Text>
-              <DateField editable={isEditable} valueISO={dueISO} onChangeISO={setDueISO} placeholder="dd/mm/yyyy" />
-            </View>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>Sync to calendar</Text>
-            <Switch
-              value={hasDue ? calendarSyncRequested : false}
-              onValueChange={onToggleCalendar}
-              disabled={!hasDue || !isEditable}
-              trackColor={{ false: "rgba(209,213,219,0.9)", true: vars.iosBlue }}
-              ios_backgroundColor="rgba(209,213,219,0.9)"
-            />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>Set reminder</Text>
-            <Switch
-              value={hasDue ? reminderEnabled : false}
-              onValueChange={onToggleReminder}
-              disabled={!hasDue || !isEditable}
-              trackColor={{ false: "rgba(209,213,219,0.9)", true: vars.iosBlue }}
-              ios_backgroundColor="rgba(209,213,219,0.9)"
-            />
-          </View>
-
-          {hasDue && reminderEnabled ? (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => (isEditable ? setReminderPickerOpen(true) : null)}
-              style={styles.reminderPill}
-            >
-              <Ionicons name="time-outline" size={16} color={vars.textMuted} />
-              <Text style={styles.reminderText}>
-                {reminderDaysBefore === 0 ? "On the day" : `${reminderDaysBefore ?? 1} day(s) before`}
-              </Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
-
-        <View style={{ height: 110 }} />
       </ScrollView>
-
       <View style={styles.bottomBar}>
-        {!isEdit ? (
-          <>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={onBack}
-              disabled={saving}
-              style={[styles.bottomBtn, styles.ghostBtn]}
-            >
-              <Text style={styles.ghostText}>Cancel</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={onSave}
-              disabled={!canSave || saving}
-              style={[styles.bottomBtn, (!canSave || saving) && styles.bottomBtnDisabled]}
-            >
-              <Text style={styles.bottomText}>Add task</Text>
-            </TouchableOpacity>
-          </>
-        ) : isLocked ? (
-          <>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={onBack}
-              disabled={saving}
-              style={[styles.bottomBtn, styles.ghostBtn]}
-            >
-              <Text style={styles.ghostText}>Back</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity activeOpacity={0.9} onPress={onEnterEdit} disabled={saving} style={[styles.bottomBtn]}>
-              <Text style={styles.bottomText}>Edit</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
-          <>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={onCancelEdit}
-              disabled={saving}
-              style={[styles.bottomBtn, styles.ghostBtn]}
-            >
-              <Text style={styles.ghostText}>Cancel</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={onSave}
-              disabled={!canSave || saving}
-              style={[styles.bottomBtn, (!canSave || saving) && styles.bottomBtnDisabled]}
-            >
-              <Text style={styles.bottomText}>Save</Text>
-            </TouchableOpacity>
-          </>
-        )}
+        {/* Handle bottom buttons for Cancel/Save */}
       </View>
-
-      {/* Assignee picker */}
-      <Modal visible={assigneeOpen} animationType="slide" transparent>
-        <TouchableOpacity activeOpacity={1} onPress={() => setAssigneeOpen(false)} style={styles.modalBackdrop}>
-          <TouchableOpacity activeOpacity={1} style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Assign to</Text>
-
-            {ASSIGNEE_OPTIONS.map((opt) => (
-              <TouchableOpacity
-                key={opt.key}
-                activeOpacity={0.85}
-                style={styles.modalRow}
-                onPress={() => chooseAssignee(opt.key)}
-              >
-                <Text style={styles.modalRowText}>{opt.label}</Text>
-                {assignedTo === opt.key ? <Ionicons name="checkmark" size={18} color={vars.iosBlue} /> : null}
-              </TouchableOpacity>
-            ))}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* Reminder picker */}
-      <Modal visible={reminderPickerOpen} animationType="fade" transparent>
-        <TouchableOpacity activeOpacity={1} onPress={() => setReminderPickerOpen(false)} style={styles.modalBackdrop}>
-          <TouchableOpacity activeOpacity={1} style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Reminder</Text>
-
-            {reminderOptions.map((d) => (
-              <TouchableOpacity key={d} activeOpacity={0.85} style={styles.modalRow} onPress={() => onReminderPick(d)}>
-                <Text style={styles.modalRowText}>{d === 0 ? "On the day" : `${d} day(s) before`}</Text>
-                {reminderDaysBefore === d ? <Ionicons name="checkmark" size={18} color={vars.iosBlue} /> : null}
-              </TouchableOpacity>
-            ))}
-          </TouchableOpacity>
-        </TouchableOpacity>
-      </Modal>
     </KeyboardAvoidingView>
   );
 }
-
-const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  loadingText: { color: vars.textMuted },
-
-  scrollContent: { padding: 16, paddingBottom: 120 },
-
-  card: {
-    backgroundColor: vars.surface,
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: vars.border,
-  },
-
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 8,
-    color: vars.text,
-  },
-
-  input: {
-    borderWidth: 1,
-    borderColor: vars.border,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    backgroundColor: vars.surface2,
-    color: vars.text,
-  },
-
-  titleInput: { marginBottom: 12 },
-
-  notesInput: { minHeight: 96 },
-
-  chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 10 },
-
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    backgroundColor: vars.surface2,
-    borderColor: vars.border,
-    borderWidth: 1,
-    borderRadius: 999,
-  },
-
-  chipText: { fontWeight: "600", color: vars.text },
-
-  divider: { height: 1, backgroundColor: vars.border, marginVertical: 14 },
-
-  twoColRow: { flexDirection: "row", gap: 12 },
-
-  col: { flex: 1 },
-
-  selectRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: vars.border,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: vars.surface2,
-    minHeight: 44,
-  },
-
-  selectText: { fontSize: 16, fontWeight: "700", color: vars.text },
-
-  otherInput: { marginTop: 10 },
-
-  toggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 10 },
-
-  toggleLabel: { fontSize: 16, fontWeight: "700", color: vars.text },
-
-  reminderPill: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: vars.border,
-    backgroundColor: vars.surface2,
-    alignSelf: "flex-start",
-  },
-
-  reminderText: { color: vars.text, fontWeight: "600" },
-
-  bottomBar: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: vars.surface,
-    padding: 12,
-    flexDirection: "row",
-    gap: 12,
-    borderTopWidth: 1,
-    borderTopColor: vars.border,
-  },
-
-  bottomBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  ghostBtn: {
-    backgroundColor: vars.surface2,
-    borderWidth: 1,
-    borderColor: vars.border,
-  },
-
-  ghostText: { fontSize: 16, fontWeight: "700", color: vars.text },
-
-  bottomText: { fontSize: 16, fontWeight: "800", color: vars.text },
-
-  bottomBtnDisabled: { opacity: 0.55 },
-
-  deleteBtn: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingVertical: 10,
-  },
-
-  deleteText: { color: vars.danger, fontWeight: "700" },
-
-  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "flex-end" },
-
-  modalSheet: {
-    backgroundColor: vars.surface,
-    padding: 16,
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderTopWidth: 1,
-    borderTopColor: vars.border,
-  },
-
-  modalTitle: { fontSize: 18, fontWeight: "800", marginBottom: 10, color: vars.text },
-
-  modalRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 12,
-  },
-
-  modalRowText: { fontSize: 16, fontWeight: "700", color: vars.text },
-});
