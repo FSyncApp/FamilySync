@@ -382,7 +382,7 @@ export default function BillsListScreen() {
                 </Text>
               )}
 
-              {!!frequency && (
+              {primary?.kind === "renews" && !!frequency && (
                 <Text style={[styles.tileMeta, expired && styles.tileSubExpired]} numberOfLines={1}>
                   {frequency}
                 </Text>
@@ -567,6 +567,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
+    justifyContent: "center",
+    alignSelf: "center",
+    width: "100%",
+    maxWidth: 280,
     backgroundColor: vars.card,
     borderRadius: 18,
     borderWidth: 1,
