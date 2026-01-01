@@ -135,7 +135,7 @@ export async function upsertTask(input: UpsertTaskInput): Promise<TaskRow> {
     const msg = (error as any)?.message ?? "";
     if (String(msg).includes("user_id") && String(msg).includes("null value")) {
       throw new Error(
-        "Tasks requires a user id. Set EXPO_PUBLIC_DEFAULT_USER_ID in your env (dev) or enable Supabase auth so a user is available."
+        "Tasks requires a user id. If you are not using Supabase auth in dev, make tasks.user_id nullable (migration in this patch), or set EXPO_PUBLIC_DEFAULT_USER_ID."
       );
     }
     throw error;
