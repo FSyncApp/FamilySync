@@ -1,4 +1,4 @@
-/** FS PATCH: Bills list — Effective due date drives Next up + sorting + tile date line (UI-only) */
+/** FS PATCH: Bills list — Next up box (3 lines) + sort by due date (not reminder) */
 import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import {
   View,
@@ -51,7 +51,7 @@ function getBillPrimaryDate(item: any): { kind: "renews" | "expires"; date: Date
   if (auto && renewal) return { kind: "renews", date: renewal };
   if (!auto && expiry) return { kind: "expires", date: expiry };
 
-  // Fallbacks (data may be incomplete)
+  // Fallbacks if legacy data is incomplete
   if (renewal) return { kind: "renews", date: renewal };
   if (expiry) return { kind: "expires", date: expiry };
 
@@ -132,19 +132,15 @@ export default function BillsListScreen() {
       return base;
     }
 
-    // Next up: sort by effective due date (renewal if auto, else expiry), then by reminder, then name
+    // "Next up" sorting: effective due date (renewal/expiry) first, reminder is secondary display only.
     base.sort((a: any, b: any) => {
       const da = getBillPrimaryDate(a)?.date;
       const db = getBillPrimaryDate(b)?.date;
-      const tda = da ? da.getTime() : Number.POSITIVE_INFINITY;
-      const tdb = db ? db.getTime() : Number.POSITIVE_INFINITY;
-      if (tda !== tdb) return tda - tdb;
 
-      const ra = getReminderDate(a);
-      const rb = getReminderDate(b);
-      const tra = ra ? ra.getTime() : Number.POSITIVE_INFINITY;
-      const trb = rb ? rb.getTime() : Number.POSITIVE_INFINITY;
-      if (tra !== trb) return tra - trb;
+      const ta = da ? da.getTime() : Number.POSITIVE_INFINITY;
+      const tb = db ? db.getTime() : Number.POSITIVE_INFINITY;
+
+      if (ta !== tb) return ta - tb;
 
       return String(a?.name ?? "").localeCompare(String(b?.name ?? ""), undefined, { sensitivity: "base" });
     });
@@ -155,28 +151,34 @@ export default function BillsListScreen() {
   const nextUp = useMemo(() => {
     const now = new Date();
 
-    const upcoming = items
-      .map((i: any) => getBillPrimaryDate(i))
-      .filter(Boolean) as { kind: "renews" | "expires"; date: Date }[];
+    const withDue = items
+      .map((it: any) => {
+        const primary = getBillPrimaryDate(it);
+        if (!primary) return null;
+        return { id: String(it?.id ?? ""), name: String(it?.name ?? ""), primary };
+      })
+      .filter(Boolean) as { id: string; name: string; primary: { kind: "renews" | "expires"; date: Date } }[];
 
-    const sorted = upcoming
-      .filter((x) => !Number.isNaN(x.date.getTime()))
-      .sort((a, b) => a.date.getTime() - b.date.getTime());
+    if (!withDue.length) {
+      return { name: "None set", detail: "" };
+    }
 
-    if (!sorted.length) return { primary: "None set", secondary: "" };
+    withDue.sort((a, b) => a.primary.date.getTime() - b.primary.date.getTime());
+    const top = withDue[0];
 
-    const first = sorted[0];
-    const diff = daysBetweenUtc(now, first.date);
+    const diff = daysBetweenUtc(now, top.primary.date);
+    const withinMonth = diff >= 0 && diff < 31;
 
-    let primary = "";
-    if (diff === 0) primary = "Today";
-    else if (diff === 1) primary = "In 1 day";
-    else if (diff > 1) primary = `In ${diff} days`;
-    else if (diff === -1) primary = "Overdue by 1 day";
-    else primary = `Overdue by ${Math.abs(diff)} days`;
+    let detail = "";
+    if (withinMonth) {
+      if (diff === 0) detail = "Today";
+      else if (diff === 1) detail = "In 1 day";
+      else detail = `In ${diff} days`;
+    } else {
+      detail = formatDateShort(top.primary.date);
+    }
 
-    const secondary = `${first.kind === "renews" ? "Renews" : "Expires"} ${formatDateShort(first.date)}`;
-    return { primary, secondary };
+    return { name: top.name || "Bills", detail };
   }, [items]);
 
   const showEmpty = !loading && items.length === 0 && !loadError;
@@ -208,6 +210,7 @@ export default function BillsListScreen() {
             <Text style={[styles.sortText, sortMode === "az" && styles.sortTextActive]}>A–Z</Text>
           </TouchableOpacity>
         </View>
+
         <Text style={styles.sortHint} numberOfLines={1}>
           {sortMode === "next" ? "Sorted by next renewal/expiry" : "Sorted alphabetically"}
         </Text>
@@ -219,12 +222,13 @@ export default function BillsListScreen() {
     ({ item }: { item: BillRow }) => {
       const provider = (item as any).provider ?? "";
       const frequency = (item as any).frequency ?? "";
-      const primary = getBillPrimaryDate(item as any);
-      const reminderAt = getReminderDate(item as any);
+      const primaryDate = getBillPrimaryDate(item as any);
 
-      const dueLine = primary
-        ? `${primary.kind === "renews" ? "Renews" : "Expires"} ${formatDateShort(primary.date)}`
+      const dateLabel = primaryDate
+        ? `${primaryDate.kind === "renews" ? "Renews" : "Expires"} ${formatDateShort(primaryDate.date)}`
         : "";
+
+      const reminderAt = getReminderDate(item as any);
 
       return (
         <TouchableOpacity
@@ -250,9 +254,9 @@ export default function BillsListScreen() {
                 </Text>
               )}
 
-              {!!dueLine && (
+              {!!dateLabel && (
                 <Text style={styles.tileMeta2} numberOfLines={1}>
-                  {dueLine}
+                  {dateLabel}
                 </Text>
               )}
             </View>
@@ -327,13 +331,11 @@ export default function BillsListScreen() {
           <View style={styles.statBox}>
             <Text style={styles.statLabel}>Next up</Text>
             <Text style={styles.statValue} numberOfLines={1}>
-              {nextUp.primary}
+              {nextUp.name}
             </Text>
-            {!!nextUp.secondary && (
-              <Text style={styles.statSub} numberOfLines={1}>
-                {nextUp.secondary}
-              </Text>
-            )}
+            <Text style={styles.statSub} numberOfLines={1}>
+              {nextUp.detail}
+            </Text>
           </View>
         </View>
       )}
@@ -357,13 +359,15 @@ export default function BillsListScreen() {
         <View style={styles.center}>
           <ActivityIndicator />
         </View>
-      ) : showEmpty ? (
-        <EmptyCard />
       ) : (
         <FlatList
           data={data}
           keyExtractor={(it: any) => it.id}
-          renderItem={({ item }: any) => (item.id === "__add__" ? <AddTile /> : <BillTile item={item} />)}
+          renderItem={({ item }: any) => {
+            if (item.id === "__add__") return <AddTile />;
+            if (item.id === "__empty__") return <EmptyCard />;
+            return <BillTile item={item} />;
+          }}
           contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
@@ -406,22 +410,22 @@ const styles = StyleSheet.create({
   },
   statLabel: { fontSize: 11, fontWeight: "700", color: vars.inkMuted },
   statValue: { marginTop: 2, fontSize: 16, fontWeight: "900", color: vars.ink },
-  statSub: { marginTop: 2, fontSize: 11, fontWeight: "800", color: vars.inkMuted },
+  statSub: { marginTop: 2, fontSize: 12, fontWeight: "800", color: vars.inkMuted },
 
-  sortRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  sortRow: { marginBottom: 12, alignItems: "center" },
   sortPill: {
     flexDirection: "row",
-    borderRadius: 999,
     borderWidth: 1,
     borderColor: vars.border,
     backgroundColor: vars.card,
+    borderRadius: 999,
     overflow: "hidden",
   },
-  sortItem: { paddingHorizontal: 12, paddingVertical: 8 },
-  sortItemActive: { backgroundColor: vars.ink },
+  sortItem: { paddingHorizontal: 14, paddingVertical: 8 },
+  sortItemActive: { backgroundColor: "rgba(17,24,39,0.06)" },
   sortText: { fontSize: 12, fontWeight: "900", color: vars.inkMuted },
-  sortTextActive: { color: "#FFFFFF" },
-  sortHint: { fontSize: 11, fontWeight: "700", color: vars.inkMuted },
+  sortTextActive: { color: vars.ink },
+  sortHint: { marginTop: 8, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
 
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
 
@@ -450,7 +454,7 @@ const styles = StyleSheet.create({
   tileTitle: { fontSize: 14, fontWeight: "900", color: vars.ink },
   tileSub: { marginTop: 3, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
   tileMeta: { marginTop: 2, fontSize: 11, fontWeight: "700", color: vars.inkMuted },
-  tileMeta2: { marginTop: 4, fontSize: 11, fontWeight: "800", color: vars.inkMuted },
+  tileMeta2: { marginTop: 4, fontSize: 12, fontWeight: "800", color: vars.inkMuted },
 
   tileRight: { flexDirection: "row", alignItems: "center", gap: 6 },
   tileAmount: { fontSize: 14, fontWeight: "900", color: vars.ink },
