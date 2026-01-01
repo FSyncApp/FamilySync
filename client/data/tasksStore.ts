@@ -1,19 +1,29 @@
-/** FS PATCH: Tasks store v1 (mirrors billsStore pattern) */
+/** FS PATCH: Tasks store v1.2 — add user_id fallback + reminders fields (mirrors billsStore pattern) */
 import { supabase } from "../lib/supabase";
 
 export type TaskRow = {
   id: string;
   family_id: string;
+
+  // Some projects include user ownership on tasks. We support it safely.
+  user_id?: string;
+
   title: string;
   notes?: string | null;
-  due_date?: string | null; // YYYY-MM-DD
-  assigned_to?: string | null;
+
+  // YYYY-MM-DD
+  due_date?: string | null;
+
+  assigned_to?: string | null; // null | "__ALL__" | free text name
   completed?: boolean | null;
+
+  // Phase 2 intent-only flags
   calendar_sync_requested?: boolean | null;
+
+  // Reminders (Phase 2 intent-only)
   reminder_enabled?: boolean | null;
   reminder_days_before?: number | null;
-  reminder_enabled?: boolean | null;
-  reminder_days_before?: number | null;
+
   created_at?: string;
   updated_at?: string;
 };
@@ -24,6 +34,26 @@ function getDefaultFamilyId(): string {
   return v;
 }
 
+/**
+ * Some deployments enforce tasks.user_id NOT NULL.
+ * We try (in order):
+ * 1) EXPO_PUBLIC_DEFAULT_USER_ID (dev/bypass-friendly)
+ * 2) supabase.auth.getUser() (if auth is enabled)
+ */
+async function resolveUserId(): Promise<string | null> {
+  const env = process.env.EXPO_PUBLIC_DEFAULT_USER_ID;
+  if (env && String(env).trim()) return String(env).trim();
+
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) return null;
+    const id = data?.user?.id;
+    return id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function listTasks(): Promise<TaskRow[]> {
   const familyId = getDefaultFamilyId();
 
@@ -31,8 +61,6 @@ export async function listTasks(): Promise<TaskRow[]> {
     .from("tasks")
     .select("*")
     .eq("family_id", familyId)
-    .order("completed", { ascending: true })
-    .order("due_date", { ascending: true, nullsFirst: false })
     .order("created_at", { ascending: false });
 
   if (error) throw error;
@@ -55,12 +83,16 @@ export async function getTaskById(id: string): Promise<TaskRow | null> {
 
 export type UpsertTaskInput = {
   id?: string;
+
   title: string;
   notes?: string | null;
+
   due_date?: string | null;
   assigned_to?: string | null;
   completed?: boolean | null;
+
   calendar_sync_requested?: boolean | null;
+
   reminder_enabled?: boolean | null;
   reminder_days_before?: number | null;
 };
@@ -77,15 +109,20 @@ export async function upsertTask(input: UpsertTaskInput): Promise<TaskRow> {
     title,
   };
 
+  // Optional fields (only set if explicitly provided)
   if (input.notes !== undefined) payload.notes = input.notes;
   if (input.due_date !== undefined) payload.due_date = input.due_date;
   if (input.assigned_to !== undefined) payload.assigned_to = input.assigned_to;
-  if (input.completed !== undefined) payload.completed = Boolean(input.completed);
-  if (input.calendar_sync_requested !== undefined)
-    payload.calendar_sync_requested = Boolean(input.calendar_sync_requested);
+  if (input.completed !== undefined) payload.completed = input.completed;
 
-  if (input.reminder_enabled !== undefined) payload.reminder_enabled = Boolean(input.reminder_enabled);
+  if (input.calendar_sync_requested !== undefined) payload.calendar_sync_requested = input.calendar_sync_requested;
+
+  if (input.reminder_enabled !== undefined) payload.reminder_enabled = input.reminder_enabled;
   if (input.reminder_days_before !== undefined) payload.reminder_days_before = input.reminder_days_before;
+
+  // user_id handling (only if the table requires it — harmless otherwise)
+  const userId = await resolveUserId();
+  if (userId) payload.user_id = userId;
 
   const { data, error } = await supabase
     .from("tasks")
@@ -93,7 +130,17 @@ export async function upsertTask(input: UpsertTaskInput): Promise<TaskRow> {
     .select("*")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    // Provide a clearer hint if a NOT NULL user_id constraint is present.
+    const msg = (error as any)?.message ?? "";
+    if (String(msg).includes("user_id") && String(msg).includes("null value")) {
+      throw new Error(
+        "Tasks requires a user id. Set EXPO_PUBLIC_DEFAULT_USER_ID in your env (dev) or enable Supabase auth so a user is available."
+      );
+    }
+    throw error;
+  }
+
   return data as TaskRow;
 }
 
