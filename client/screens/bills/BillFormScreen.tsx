@@ -1,4 +1,4 @@
-/** FS PATCH: Bill form UI polish — clearer view mode + require date + confirm £0 (UI-only) */
+/** FS PATCH MARKER: Bills UI — header delete + pinned bottom bar + scroll */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
@@ -57,7 +57,6 @@ export default function BillFormScreen() {
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
 
-  // In edit mode, we start in view-only until the user taps Edit.
   const [isEditing, setIsEditing] = useState(mode === "create");
 
   const [createdAt, setCreatedAt] = useState<string | undefined>(undefined);
@@ -73,13 +72,6 @@ export default function BillFormScreen() {
   const [frequency, setFrequency] = useState<Frequency>("monthly");
   const [dateISO, setDateISO] = useState<string>("");
 
-  const [reminderEnabled, setReminderEnabled] = useState(false);
-  const [reminderDaysBefore, setReminderDaysBefore] = useState<number>(7);
-  const [reminderPreset, setReminderPreset] = useState<"1" | "3" | "7" | "14" | "custom">("7");
-
-  const [billTitle, setBillTitle] = useState<string>("");
-  const [dateError, setDateError] = useState<string | null>(null);
-
   const originalRef = useRef<{
     name: string;
     amountText: string;
@@ -89,60 +81,12 @@ export default function BillFormScreen() {
     autoRenewing: boolean;
     frequency: Frequency;
     dateISO: string;
-    reminderEnabled: boolean;
-    reminderDaysBefore: number;
-    reminderPreset: "1" | "3" | "7" | "14" | "custom";
   } | null>(null);
 
-  const canSubmit = useMemo(() => {
-    const amt = parseMoneyToNumber(amountText);
-    return !!name.trim() && typeof amt === "number" && !Number.isNaN(amt);
-  }, [amountText, name]);
+  const title = useMemo(() => (mode === "create" ? "Add bill" : "Bill"), [mode]);
 
-  const hasDate = !!dateISO;
-  const effectiveReminderEnabled = reminderEnabled && hasDate;
-
-  const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
-
-  useEffect(() => {
-    // If there is no date, reminders can’t be active.
-    if (!dateISO) {
-      setReminderEnabled(false);
-    }
-    if (dateISO) setDateError(null);
-  }, [dateISO]);
-
-  useEffect(() => {
-    if (!autoRenewing) setDateError(null);
-  }, [autoRenewing]);
-
-
-  const onEditPress = useCallback(() => setIsEditing(true), []);
-
-  const onCancel = useCallback(() => {
-    const orig = originalRef.current;
-    if (!orig) {
-      setIsEditing(false);
-      return;
-    }
-    setName(orig.name);
-    setAmountText(orig.amountText);
-    setProvider(orig.provider);
-    setCategory(orig.category);
-    setNotes(orig.notes);
-    setAutoRenewing(orig.autoRenewing);
-    setFrequency(orig.frequency);
-    setDateISO(orig.dateISO);
-    setReminderEnabled(orig.reminderEnabled);
-    setReminderDaysBefore(orig.reminderDaysBefore);
-    setReminderPreset(orig.reminderPreset);
-    setDateError(null);
-    setIsEditing(false);
-  }, []);
-
-  const onDelete = useCallback(() => {
-    if (mode !== "edit" || !billId) return;
-
+  const onDelete = useCallback(async () => {
+    if (!billId) return;
     Alert.alert("Delete bill?", "This can’t be undone.", [
       { text: "Cancel", style: "cancel" },
       {
@@ -161,188 +105,27 @@ export default function BillFormScreen() {
         },
       },
     ]);
-  }, [billId, mode, navigation]);
+  }, [billId, navigation]);
 
-
-  const doSaveOrUpdate = useCallback(async () => {
-    setSaving(true);
-    try {
-      const amount = parseMoneyToNumber(amountText);
-
-      await upsertBill({
-        id: mode === "edit" ? billId : undefined,
-        name: name.trim(),
-        amount,
-        provider: provider.trim(),
-        category: category.trim(),
-        notes: notes.trim(),
-        auto_renew: autoRenewing,
-        frequency,
-        expiry_date: autoRenewing ? null : (dateISO || null),
-        renewal_date: autoRenewing ? (dateISO || null) : null,
-        reminder_enabled: reminderEnabled,
-        reminder_days_before: reminderDaysBefore,
-      } as any);
-
-      if (mode === "create") {
-        navigation.goBack();
-        return;
-      }
-
-      // Update our "original" snapshot to enable cancel/back-to-view mode.
-      originalRef.current = {
-        name: name.trim(),
-        amountText: Number(amount).toFixed(2),
-        provider,
-        category,
-        notes,
-        autoRenewing,
-        frequency,
-        dateISO,
-        reminderEnabled,
-        reminderDaysBefore,
-        reminderPreset,
-      };
-
-      setBillTitle(name.trim());
-      setIsEditing(false);
-    } catch (e: any) {
-      Alert.alert("Error", e?.message ?? "Failed to save");
-    } finally {
-      setSaving(false);
-    }
-  }, [
-    amountText,
-    autoRenewing,
-    billId,
-    category,
-    dateISO,
-    frequency,
-    mode,
-    name,
-    navigation,
-    notes,
-    provider,
-    reminderDaysBefore,
-    reminderEnabled,
-    reminderPreset,
-  ]);
-
-  const onSaveOrUpdate = useCallback(async () => {
-    if (!canSubmit) {
-      Alert.alert("Missing info", "Please enter a bill name and amount.");
-      return;
-    }
-
-    if (autoRenewing && !dateISO) {
-      setDateError("Please set a renewal date before saving.");
-      Alert.alert("Missing renewal date", "Please set a renewal date before saving.");
-      return;
-    }
-
-    const amount = parseMoneyToNumber(amountText);
-    if (Number.isFinite(amount) && amount === 0) {
-      Alert.alert(
-        "Amount is £0",
-        "Are you sure you want this bill total to be £0.00?",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: mode === "create" ? "Save anyway" : "Update anyway",
-            style: "default",
-            onPress: () => {
-              doSaveOrUpdate();
-            },
-          },
-        ]
-      );
-      return;
-    }
-
-    await doSaveOrUpdate();
-  }, [amountText, canSubmit, dateISO, doSaveOrUpdate, mode]);
-
-  // Title rules:
-  // - Create: "Add bill"
-  // - Edit: show bill name if we have one, otherwise "Bills"
-  const headerTitle = useMemo(() => {
-    if (mode === "create") return "Add bill";
-    return billTitle?.trim() ? billTitle.trim() : "Bills";
-  }, [billTitle, mode]);
-
-  // Header actions (Option A)
   useEffect(() => {
+    // Header: title always; delete icon only on existing bills.
     navigation.setOptions({
-      title: headerTitle,
-      headerLeft: () =>
-        mode === "edit" && isEditing ? (
-          <TouchableOpacity
-            onPress={onCancel}
-            disabled={saving}
-            style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: saving ? 0.5 : 1 }}
-            accessibilityLabel="Cancel editing"
-          >
-            <Text style={{ fontSize: 15, fontWeight: "900", color: vars.inkMuted }}>Cancel</Text>
-          </TouchableOpacity>
-        ) : null,
-      headerRight: () => {
-        // Create: Save
-        if (mode === "create") {
-          const disabled = saving || !canSubmit;
-          return (
-            <TouchableOpacity
-              onPress={onSaveOrUpdate}
-              disabled={disabled}
-              style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: disabled ? 0.5 : 1 }}
-              accessibilityLabel="Save bill"
-            >
-              <Text style={{ fontSize: 15, fontWeight: "900", color: vars.ink }}>Save</Text>
-            </TouchableOpacity>
-          );
-        }
-
-        // Edit: View mode => Edit + Trash
-        //       Editing  => Update (no Trash while editing)
-        const label = isEditing ? (saving ? "Updating…" : "Update") : "Edit";
-        const disabled = saving || (isEditing ? !canSubmit : false);
-
-        if (!isEditing) {
-          return (
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <TouchableOpacity
-                onPress={onEditPress}
-                disabled={disabled}
-                style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: disabled ? 0.5 : 1 }}
-                accessibilityLabel="Edit bill"
-              >
-                <Text style={{ fontSize: 15, fontWeight: "900", color: vars.ink }}>Edit</Text>
-              </TouchableOpacity>
-
+      title,
+      headerRight:
+        mode === "edit"
+          ? () => (
               <TouchableOpacity
                 onPress={onDelete}
                 disabled={saving}
-                style={{ paddingHorizontal: 10, paddingVertical: 6, opacity: saving ? 0.5 : 1 }}
+                style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: saving ? 0.5 : 1 }}
                 accessibilityLabel="Delete bill"
               >
                 <Ionicons name="trash-outline" size={20} color="#991B1B" />
               </TouchableOpacity>
-            </View>
-          );
-        }
-
-        return (
-          <TouchableOpacity
-            onPress={onSaveOrUpdate}
-            disabled={disabled}
-            style={{ paddingHorizontal: 12, paddingVertical: 6, opacity: disabled ? 0.5 : 1 }}
-            accessibilityLabel="Update bill"
-          >
-            <Text style={{ fontSize: 15, fontWeight: "900", color: vars.ink }}>{label}</Text>
-          </TouchableOpacity>
-        );
-      },
+            )
+          : () => null,
     });
-  }, [canSubmit, headerTitle, isEditing, mode, navigation, onCancel, onEditPress, onSaveOrUpdate, saving]);
+  }, [mode, navigation, onDelete, saving, title]);
 
   const load = useCallback(async () => {
     if (mode !== "edit") return;
@@ -380,19 +163,6 @@ export default function BillFormScreen() {
       const iso = (ar ? (bill as any).renewal_date : (bill as any).expiry_date) ?? "";
       setDateISO(String(iso ?? ""));
 
-      const reEnabled = Boolean((bill as any).reminder_enabled ?? false);
-      const reDays = Number((bill as any).reminder_days_before ?? 7);
-      const safeDays = Number.isFinite(reDays) && reDays > 0 ? reDays : 7;
-      setReminderEnabled(reEnabled);
-      setReminderDaysBefore(safeDays);
-      setReminderPreset(
-        safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14
-          ? (String(safeDays) as any)
-          : "custom"
-      );
-
-      setBillTitle(loadedName);
-
       originalRef.current = {
         name: loadedName,
         amountText: loadedAmountText,
@@ -402,16 +172,9 @@ export default function BillFormScreen() {
         autoRenewing: ar,
         frequency: (((bill as any).frequency as Frequency) ?? "monthly") as Frequency,
         dateISO: String(iso ?? ""),
-        reminderEnabled: reEnabled,
-        reminderDaysBefore: safeDays,
-        reminderPreset:
-          safeDays === 1 || safeDays === 3 || safeDays === 7 || safeDays === 14
-            ? (String(safeDays) as any)
-            : "custom",
       };
 
       setIsEditing(false);
-      setDateError(null);
     } catch (e: any) {
       Alert.alert("Error", e?.message ?? "Failed to load bill");
       navigation.goBack();
@@ -423,6 +186,79 @@ export default function BillFormScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const canSubmit = useMemo(() => {
+    const amt = parseMoneyToNumber(amountText);
+    return !!name.trim() && typeof amt === "number" && !Number.isNaN(amt);
+  }, [amountText, name]);
+
+  const dateLabel = autoRenewing ? "Renewal date" : "Expiry date";
+
+  const onEditPress = () => setIsEditing(true);
+
+  const onUndo = () => {
+    const orig = originalRef.current;
+    if (!orig) {
+      setIsEditing(false);
+      return;
+    }
+    setName(orig.name);
+    setAmountText(orig.amountText);
+    setProvider(orig.provider);
+    setCategory(orig.category);
+    setNotes(orig.notes);
+    setAutoRenewing(orig.autoRenewing);
+    setFrequency(orig.frequency);
+    setDateISO(orig.dateISO);
+    setIsEditing(false);
+  };
+
+  const onSaveOrUpdate = async () => {
+    if (!canSubmit) {
+      Alert.alert("Missing info", "Please enter a bill name and amount.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const amount = parseMoneyToNumber(amountText);
+
+      await upsertBill({
+        id: mode === "edit" ? billId : undefined,
+        name: name.trim(),
+        amount,
+        provider: provider.trim(),
+        category: category.trim(),
+        notes: notes.trim(),
+        auto_renew: autoRenewing,
+        frequency,
+        expiry_date: autoRenewing ? null : (dateISO || null),
+        renewal_date: autoRenewing ? (dateISO || null) : null,
+      } as any);
+
+      if (mode === "create") {
+        navigation.goBack();
+        return;
+      }
+
+      originalRef.current = {
+        name: name.trim(),
+        amountText: Number(amount).toFixed(2),
+        provider,
+        category,
+        notes,
+        autoRenewing,
+        frequency,
+        dateISO,
+      };
+
+      setIsEditing(false);
+    } catch (e: any) {
+      Alert.alert("Error", e?.message ?? "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -436,14 +272,7 @@ export default function BillFormScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 18 }}>
-        {mode === "edit" && !isEditing && (
-          <View style={styles.readOnlyBanner}>
-            <Ionicons name="eye-outline" size={16} color={vars.inkMuted} />
-            <Text style={styles.readOnlyBannerText}>View mode • Tap Edit to make changes</Text>
-          </View>
-        )}
-
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 96 }}>
         <View style={styles.card}>
           <View style={styles.row}>
             <Text style={styles.label}>Bill name</Text>
@@ -458,15 +287,15 @@ export default function BillFormScreen() {
 
           <View style={styles.row}>
             <Text style={styles.label}>Amount</Text>
-            <View style={[styles.moneyRow, !isEditing && styles.moneyRowDisabled]}>
-              <Text style={[styles.pound, !isEditing && styles.poundDisabled]}>£</Text>
+            <View style={styles.moneyRow}>
+              <Text style={styles.pound}>£</Text>
               <TextInput
                 value={amountText}
                 onChangeText={setAmountText}
                 placeholder="0.00"
                 keyboardType="decimal-pad"
                 editable={isEditing}
-                style={[styles.moneyInput, !isEditing && styles.moneyInputDisabled]}
+                style={[styles.moneyInput, !isEditing && styles.inputDisabled]}
               />
             </View>
           </View>
@@ -511,12 +340,7 @@ export default function BillFormScreen() {
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => isEditing && setAutoRenewing((v) => !v)}
-                disabled={!isEditing}
-                style={[
-                  styles.togglePill,
-                  (!isEditing || !autoRenewing) && styles.togglePillOff,
-                  !isEditing && styles.disabledPill,
-                ]}
+                style={[styles.togglePill, (!isEditing || !autoRenewing) && styles.togglePillOff]}
               >
                 <Text style={[styles.toggleText, (!isEditing || !autoRenewing) && styles.toggleTextOff]}>
                   {autoRenewing ? "On" : "Off"}
@@ -524,7 +348,7 @@ export default function BillFormScreen() {
               </TouchableOpacity>
             </View>
 
-            <View style={[styles.freqRow, !autoRenewing && { opacity: 0.45 }, !isEditing && { opacity: 0.55 }]}>
+            <View style={[styles.freqRow, !autoRenewing && { opacity: 0.45 }]}>
               {FREQ_OPTIONS.map((opt) => {
                 const selected = frequency === opt.key;
                 return (
@@ -548,89 +372,6 @@ export default function BillFormScreen() {
               editable={isEditing}
               placeholder="dd/mm/yyyy"
             />
-
-            {!!dateError && <Text style={styles.errorInline}>{dateError}</Text>}
-
-            <View style={styles.reminderSection}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Reminders</Text>
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => isEditing && hasDate && setReminderEnabled((v) => !v)}
-                  disabled={!isEditing || !hasDate}
-                  style={[
-                    styles.togglePill,
-                    (!isEditing || !hasDate || !effectiveReminderEnabled) && styles.togglePillOff,
-                    !isEditing && styles.disabledPill,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.toggleText,
-                      (!isEditing || !hasDate || !effectiveReminderEnabled) && styles.toggleTextOff,
-                    ]}
-                  >
-                    {effectiveReminderEnabled ? "On" : "Off"}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {!hasDate ? (
-                <Text style={styles.helperText}>Set a date above to enable reminders.</Text>
-              ) : (
-                <>
-                  <View style={[styles.reminderChips, !effectiveReminderEnabled && { opacity: 0.45 }]}>
-                    {[
-                      { key: "1", label: "1 day" },
-                      { key: "3", label: "3 days" },
-                      { key: "7", label: "7 days" },
-                      { key: "14", label: "14 days" },
-                      { key: "custom", label: "Custom" },
-                    ].map((opt) => {
-                      const selected = reminderPreset === (opt.key as any);
-                      return (
-                        <TouchableOpacity
-                          key={opt.key}
-                          activeOpacity={0.85}
-                          disabled={!isEditing || !effectiveReminderEnabled}
-                          onPress={() => {
-                            setReminderPreset(opt.key as any);
-                            if (opt.key !== "custom") {
-                              const n = Number(opt.key);
-                              if (Number.isFinite(n)) setReminderDaysBefore(n);
-                            }
-                          }}
-                          style={[styles.chip, selected && styles.chipSelected]}
-                        >
-                          <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{opt.label}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-
-                  {reminderPreset === "custom" && (
-                    <View style={[styles.customRow, !effectiveReminderEnabled && { opacity: 0.45 }]}>
-                      <Text style={styles.customLabel}>Days before</Text>
-                      <TextInput
-                        value={String(reminderDaysBefore)}
-                        onChangeText={(t) => {
-                          const v = Number(String(t).replace(/[^0-9]/g, ""));
-                          if (!Number.isFinite(v)) return;
-                          setReminderDaysBefore(Math.max(1, Math.min(365, v)));
-                        }}
-                        keyboardType="number-pad"
-                        editable={isEditing && effectiveReminderEnabled}
-                        style={[styles.customInput, (!isEditing || !effectiveReminderEnabled) && styles.inputDisabled]}
-                      />
-                    </View>
-                  )}
-
-                  <Text style={styles.helperText}>
-                    Reminds you {reminderDaysBefore} day{reminderDaysBefore === 1 ? "" : "s"} before.
-                  </Text>
-                </>
-              )}
-            </View>
           </View>
 
           {mode === "edit" && !!createdLabel && (
@@ -641,6 +382,45 @@ export default function BillFormScreen() {
           )}
         </View>
       </ScrollView>
+
+      <View style={styles.bottomBarFixed}>
+        {mode === "edit" ? (
+          isEditing ? (
+            <View style={styles.bottomRow}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={onUndo}
+                disabled={saving}
+                style={[styles.secondaryBtn, saving && styles.primaryBtnDisabled]}
+              >
+                <Text style={styles.secondaryText}>Undo</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={onSaveOrUpdate}
+                disabled={saving || !canSubmit}
+                style={[styles.primaryBtn, (saving || !canSubmit) && styles.primaryBtnDisabled]}
+              >
+                <Text style={styles.primaryText}>{saving ? "Updating..." : "Update"}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity activeOpacity={0.9} onPress={onEditPress} style={styles.primaryBtn}>
+              <Text style={styles.primaryText}>Edit</Text>
+            </TouchableOpacity>
+          )
+        ) : (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={onSaveOrUpdate}
+            disabled={saving || !canSubmit}
+            style={[styles.primaryBtn, (saving || !canSubmit) && styles.primaryBtnDisabled]}
+          >
+            <Text style={styles.primaryText}>{saving ? "Saving..." : "Save"}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </KeyboardAvoidingView>
   );
 }
@@ -657,20 +437,6 @@ const vars = {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: vars.bg, padding: 14 },
   center: { alignItems: "center", justifyContent: "center" },
-
-  readOnlyBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: vars.border,
-    backgroundColor: "rgba(255,255,255,0.75)",
-    marginBottom: 10,
-  },
-  readOnlyBannerText: { fontSize: 12, fontWeight: "800", color: vars.inkMuted },
 
   card: {
     backgroundColor: vars.card,
@@ -723,11 +489,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     height: 44,
   },
-  moneyRowDisabled: { backgroundColor: "#F3F4F6" },
   pound: { fontSize: 16, fontWeight: "900", color: vars.ink, marginRight: 6 },
-  poundDisabled: { color: vars.inkMuted },
   moneyInput: { flex: 1, fontSize: 14, fontWeight: "800", color: vars.ink },
-  moneyInputDisabled: { color: vars.inkMuted },
 
   section: {
     marginTop: 2,
@@ -745,7 +508,6 @@ const styles = StyleSheet.create({
     backgroundColor: vars.ink,
   },
   togglePillOff: { backgroundColor: "#E5E7EB" },
-  disabledPill: { opacity: 0.7 },
   toggleText: { fontSize: 12, fontWeight: "900", color: "#FFFFFF" },
   toggleTextOff: { color: vars.inkMuted },
 
@@ -762,33 +524,37 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 12, fontWeight: "800", color: vars.ink },
   chipTextSelected: { color: "#FFFFFF" },
 
-  errorInline: { marginTop: 8, fontSize: 12, fontWeight: "800", color: "#B91C1C" },
+  metaRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 2 },
+  metaText: { fontSize: 12, fontWeight: "700", color: vars.inkMuted },
 
-  reminderSection: { marginTop: 12 },
-  reminderChips: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 10 },
-  helperText: { marginTop: 8, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
-  customRow: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
+  bottomBarFixed: {
+    position: "absolute",
+    left: 14,
+    right: 14,
+    bottom: 14,
   },
-  customLabel: { fontSize: 12, fontWeight: "800", color: vars.ink },
-  customInput: {
-    width: 92,
-    height: 40,
-    borderRadius: 12,
+  bottomRow: { flexDirection: "row", gap: 10 },
+
+  secondaryBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: vars.border,
     backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    fontSize: 13,
-    fontWeight: "800",
-    color: vars.ink,
-    textAlign: "center",
+    alignItems: "center",
+    justifyContent: "center",
   },
+  secondaryText: { color: vars.ink, fontSize: 15, fontWeight: "900" },
 
-  metaRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 2 },
-  metaText: { fontSize: 12, fontWeight: "700", color: vars.inkMuted },
+  primaryBtn: {
+    flex: 1,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: vars.ink,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  primaryBtnDisabled: { opacity: 0.45 },
+  primaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
 });
