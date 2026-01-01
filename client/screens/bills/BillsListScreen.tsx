@@ -1,4 +1,4 @@
-/** FS PATCH: Bills list — empty state Option A hero (no card) + preserves v2 sorting/tile layout (UI-only) */
+/** FS PATCH: Bills list — expired labels + greyed tiles + keep v2 sorting + empty state Option A (UI-only) */
 import React, { useCallback, useLayoutEffect, useMemo, useState } from "react";
 import {
   View,
@@ -57,6 +57,25 @@ function getEffectiveDueDate(item: any): Date | null {
   return primary?.date ?? null;
 }
 
+
+function isExpiredBill(item: any, now: Date): boolean {
+  const primary = getBillPrimaryDate(item);
+  if (!primary || primary.kind !== "expires") return false;
+  const due = primary.date;
+  return daysBetweenUtc(now, due) < 0;
+}
+
+function getDueSortKey(item: any, now: Date): number {
+  const due = getEffectiveDueDate(item);
+  if (!due) return Number.POSITIVE_INFINITY;
+
+  // Push expired items to the bottom of "Next up"
+  if (isExpiredBill(item, now)) return Number.POSITIVE_INFINITY;
+
+  return due.getTime();
+}
+
+
 function getReminderDate(item: any): Date | null {
   const enabled = Boolean(item?.reminder_enabled ?? item?.reminderEnabled ?? false);
   if (!enabled) return null;
@@ -80,13 +99,25 @@ function formatMoneyGeneric(amount: number) {
   return v.toFixed(2);
 }
 
-function formatDueLine(now: Date, due: Date) {
+function formatDueLine(
+  now: Date,
+  due: Date,
+  opts?: { kind?: "renews" | "expires" }
+) {
   const diff = daysBetweenUtc(now, due);
+
+  // Special-case: an expiry date in the past is "Expired on …" (not "Due/Overdue").
+  if (opts?.kind === "expires" && diff < 0) {
+    return `Expired on ${formatDateShort(due)}`;
+  }
+
   if (diff === 0) return "Today";
   if (diff === 1) return "In 1 day";
   if (diff > 1 && diff < 30) return `In ${diff} days`;
   if (diff === -1) return "Overdue by 1 day";
   if (diff < -1) return `Overdue by ${Math.abs(diff)} days`;
+
+  // >= 30 days away: show the date
   return formatDateShort(due);
 }
 
@@ -152,38 +183,47 @@ export default function BillsListScreen() {
     }
 
     base.sort((a: any, b: any) => {
-      const da = getEffectiveDueDate(a);
-      const db = getEffectiveDueDate(b);
-      const ta = da ? da.getTime() : Number.POSITIVE_INFINITY;
-      const tb = db ? db.getTime() : Number.POSITIVE_INFINITY;
+      const ka = getDueSortKey(a, now);
+      const kb = getDueSortKey(b, now);
+      if (ka !== kb) return ka - kb;
+
+      // Secondary: reminder date (if any)
+      const ra = getReminderDate(a);
+      const rb = getReminderDate(b);
+      const ta = ra ? ra.getTime() : Number.POSITIVE_INFINITY;
+      const tb = rb ? rb.getTime() : Number.POSITIVE_INFINITY;
       if (ta !== tb) return ta - tb;
 
       return String(a?.name ?? "").localeCompare(String(b?.name ?? ""), undefined, { sensitivity: "base" });
     });
 
     return base;
-  }, [items, sortMode]);
+  }, [items, sortMode, now]);
 
   const nextUp = useMemo(() => {
-    const withDue = items
-      .map((i: any) => ({ item: i, due: getEffectiveDueDate(i) }))
-      .filter((x) => x.due && !Number.isNaN((x.due as Date).getTime())) as { item: any; due: Date }[];
+    if (!items.length) return null;
 
-    if (!withDue.length) return null;
+    // Choose the soonest *non-expired* due date (expiry/renewal). Expired items are shown lower in the list.
+    const candidates = items
+      .map((it: any) => {
+        const primary = getBillPrimaryDate(it);
+        const due = getEffectiveDueDate(it);
+        const sortKey = getDueSortKey(it, now);
+        return primary && due && Number.isFinite(sortKey)
+          ? { id: it.id, name: it.name, kind: primary.kind, due, sortKey }
+          : null;
+      })
+      .filter(Boolean) as { id: string; name: string; kind: "renews" | "expires"; due: Date; sortKey: number }[];
 
-    withDue.sort((a, b) => a.due.getTime() - b.due.getTime());
-    const top = withDue[0];
-    const primary = getBillPrimaryDate(top.item);
-    return {
-      name: String(top.item?.name ?? "").trim() || "Bill",
-      due: top.due,
-      kind: primary?.kind ?? "expires",
-    };
-  }, [items]);
+    if (!candidates.length) return null;
+
+    candidates.sort((a, b) => a.sortKey - b.sortKey);
+    return candidates[0];
+  }, [items, now]);
 
   const nextUpLine3 = useMemo(() => {
     if (!nextUp) return null;
-    return formatDueLine(now, nextUp.due);
+    return formatDueLine(now, nextUp.due, { kind: nextUp.kind });
   }, [nextUp, now]);
 
   const nextReminderBox = useMemo(() => {
@@ -244,22 +284,23 @@ export default function BillsListScreen() {
       const primary = getBillPrimaryDate(item as any);
       const due = getEffectiveDueDate(item as any);
       const reminder = getReminderDate(item as any);
+      const expired = isExpiredBill(item as any, now);
 
       const dueLabel =
         primary && due
-          ? `${primary.kind === "renews" ? "Renews" : "Expires"} ${formatDateShort(due)}`
+          ? (expired ? "" : `${primary.kind === "renews" ? "Renews" : "Expires"} ${formatDateShort(due)}`)
           : due
             ? formatDateShort(due)
             : "";
 
-      const dueLine = due ? formatDueLine(now, due) : "";
+      const dueLine = due ? formatDueLine(now, due, { kind: primary?.kind }) : "";
       const reminderLine = reminder ? formatDueLine(now, reminder) : "";
 
       return (
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => navigation.navigate("BillForm", { mode: "edit", billId: (item as any).id })}
-          style={styles.tile}
+          style={[styles.tile, expired && styles.tileExpired]}
         >
           <View style={styles.tileTop}>
             <View style={{ flex: 1, paddingRight: 10 }}>
@@ -295,7 +336,7 @@ export default function BillsListScreen() {
           </View>
 
           {!!dueLine && (
-            <View style={styles.duePill}>
+            <View style={[styles.duePill, expired && styles.duePillExpired]}>
               <Ionicons name="calendar-outline" size={14} color={vars.inkMuted} />
               <Text style={styles.dueText} numberOfLines={1}>
                 Due {dueLine}
@@ -507,6 +548,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 10,
   },
+  tileExpired: {
+    opacity: 0.55,
+  },
   tileTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   tileTitle: { fontSize: 14, fontWeight: "900", color: vars.ink },
   tileSub: { marginTop: 3, fontSize: 12, fontWeight: "700", color: vars.inkMuted },
@@ -529,7 +573,14 @@ const styles = StyleSheet.create({
     borderColor: vars.border,
     backgroundColor: "rgba(17,24,39,0.02)",
   },
+  duePillExpired: {
+    backgroundColor: vars.bgSoft,
+    borderColor: vars.line,
+  },
   dueText: { fontSize: 11, fontWeight: "800", color: vars.inkMuted },
+  dueTextExpired: {
+    color: vars.inkMuted,
+  },
 
   reminderPill: {
     marginTop: 8,
