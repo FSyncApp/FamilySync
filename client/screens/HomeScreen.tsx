@@ -16,7 +16,7 @@ type TodayItem = {
 
 type ShortcutAction =
   | { kind: "tab"; tab: keyof MainTabParamList }
-  | { kind: "navigate"; route: "Bills" }
+  | { kind: "navigate"; route: "Bills" | "Tasks" }
   | { kind: "comingSoon" };
 
 
@@ -52,7 +52,7 @@ const TODAY_SCROLL_ANIM_GUARD_MS = 650; // normalize after animated scroll finis
  */
 const SHORTCUTS: ShortcutItem[] = [
   { id: "s1", icon: "calendar-outline", label: "Calendar", action: { kind: "tab", tab: "Calendar" } },
-  { id: "s2", icon: "checkmark-done-outline", label: "Tasks", action: { kind: "comingSoon" } },
+  { id: "s2", icon: "checkmark-done-outline", label: "Tasks", action: { kind: "navigate", route: "Tasks" } },
   { id: "s3", icon: "restaurant-outline", label: "Meals", action: { kind: "comingSoon" } },
   // Birthdays has an actual Phase 1 screen under HomeStack
   { id: "s4", icon: "gift-outline", label: "Birthdays", action: { kind: "comingSoon" } },

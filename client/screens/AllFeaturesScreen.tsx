@@ -21,7 +21,12 @@ import { useNavigation } from "@react-navigation/native";
  */
 
 type Action =
-  | { kind: "tab"; tab: "Home" | "Calendar" | "Messages" | "Settings"; screen?: string }
+  | {
+      kind: "tab";
+      tab: "Home" | "Calendar" | "Messages" | "Settings";
+      screen?: string;
+      params?: any;
+    }
   | { kind: "route"; route: string }
   | { kind: "none" };
 
@@ -49,6 +54,13 @@ const LIVE_FEATURES: FeatureItem[] = [
     subtitle: "Track what’s due and when",
     icon: "receipt-outline",
     action: { kind: "route", route: "Bills" },
+  },
+  {
+    id: "tasks",
+    title: "Tasks",
+    subtitle: "Shared to‑dos and jobs to do",
+    icon: "checkmark-done-outline",
+    action: { kind: "route", route: "Tasks" },
   },
   {
     id: "calendar",
@@ -88,14 +100,6 @@ const LIVE_FEATURES: FeatureItem[] = [
 ];
 
 const COMING_SOON: FeatureItem[] = [
-  {
-    id: "tasks",
-    title: "Tasks",
-    subtitle: "Shared to‑dos and checklists",
-    icon: "checkmark-done-outline",
-    action: { kind: "none" },
-    disabled: true,
-  },
   {
     id: "meals",
     title: "Meals",
@@ -239,12 +243,7 @@ export default function AllFeaturesScreen() {
 
         <Section title="Features">
           {LIVE_FEATURES.map((item, idx) => (
-            <Row
-              key={item.id}
-              item={item}
-              onPress={() => onItemPress(item)}
-              isLast={idx === LIVE_FEATURES.length - 1}
-            />
+            <Row key={item.id} item={item} onPress={() => onItemPress(item)} isLast={idx === LIVE_FEATURES.length - 1} />
           ))}
         </Section>
 
@@ -264,7 +263,6 @@ export default function AllFeaturesScreen() {
     </SafeAreaView>
   );
 }
-
 
 const styles = StyleSheet.create({
   safe: {
@@ -339,20 +337,26 @@ const styles = StyleSheet.create({
 
   iconWrap: {
     width: 28,
+    height: 28,
+    borderRadius: 10,
     alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(238,240,245,0.9)",
+    borderWidth: 1,
+    borderColor: "rgba(230,232,238,0.9)",
   },
 
   rowTitle: {
-    fontSize: 15,
+    fontSize: 14,
     lineHeight: 18,
     fontWeight: "800",
     color: stylesVars.ink,
   },
   rowTitleDisabled: {
-    color: "#4B5563",
+    color: "rgba(17,24,39,0.6)",
   },
   rowSubtitle: {
-    marginTop: 3,
+    marginTop: 2,
     fontSize: 12,
     lineHeight: 15,
     fontWeight: "600",
@@ -360,9 +364,9 @@ const styles = StyleSheet.create({
   },
 
   chev: {
-    fontSize: 22,
-    color: "#9CA3AF",
-    marginLeft: 6,
-    marginTop: -2,
+    fontSize: 18,
+    fontWeight: "900",
+    color: stylesVars.inkMuted,
+    paddingLeft: 6,
   },
 });

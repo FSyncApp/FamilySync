@@ -7,6 +7,7 @@ import BirthdayDetailScreen from "../screens/BirthdayDetailScreen";
 import BirthdaysEditScreen from "../screens/BirthdaysEditScreen";
 
 import BillsStack from "./BillsStack";
+import TasksStack from "./TasksStack";
 import AllFeaturesScreen from "../screens/AllFeaturesScreen";
 
 /**
@@ -39,6 +40,7 @@ export type HomeStackParamList = {
 
   // Phase 2: Bills flow (separate stack)
   Bills: undefined;
+  Tasks: undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -56,6 +58,7 @@ export default function HomeStack() {
 
       {/* Bills lives in its own stack — hide header here so BillsStack owns titles/back */}
       <Stack.Screen name="Bills" component={BillsStack} options={{ headerShown: false }} />
+      <Stack.Screen name="Tasks" component={TasksStack} options={{ headerShown: false }} />
 
       <Stack.Screen
         name="Birthdays"
