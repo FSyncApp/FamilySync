@@ -21,9 +21,6 @@ import DateField from "../../components/DateField";
 import { deleteTask, getTaskById, upsertTask } from "../../data/tasksStore";
 import { getUserSettings } from "../../data/settingsStore";  // Assuming we have a function to fetch user settings
 
-// Using absolute path for styles import
-import { styles } from "/client/styles";  // Absolute path import to avoid relative path issues
-
 const vars = {
   surface: "#FFFFFF",
   surface2: "#F3F4F6",
