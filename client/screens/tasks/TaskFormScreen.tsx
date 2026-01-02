@@ -21,6 +21,9 @@ import DateField from "../../components/DateField";
 import { deleteTask, getTaskById, upsertTask } from "../../data/tasksStore";
 import { getUserSettings } from "../../data/settingsStore";  // Assuming we have a function to fetch user settings
 
+// Fixing the import path to styles.ts using absolute path
+import { styles } from "/Users/markrobson/dev/FamilySync/client/styles";  // Absolute path import
+
 const vars = {
   surface: "#FFFFFF",
   surface2: "#F3F4F6",
