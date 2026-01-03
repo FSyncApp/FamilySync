@@ -1,8 +1,4 @@
-/** Router Bills (Phase 2 migration): Router-native list UI, backed by legacy billsStore.
- *  - Navigation: Bills shortcut now routes here.
- *  - Add/Edit: temporarily opens Legacy Bills (until BillForm is migrated).
- */
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -11,450 +7,347 @@ import {
   ActivityIndicator,
   FlatList,
   RefreshControl,
-  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 
 import { listBills, type BillRow } from "../../migration_src/client/data/billsStore";
 
-type SortMode = "due" | "az";
+type SortMode = "next" | "az";
 
-function pad2(n: number) {
-  return n < 10 ? `0${n}` : `${n}`;
-}
-
-function parseISODateMaybe(s?: string | null): Date | null {
-  if (!s) return null;
-  // Accept YYYY-MM-DD or full ISO strings.
-  const d = new Date(s);
-  if (!Number.isFinite(d.getTime())) return null;
+function parseISODateMaybe(value: any): Date | null {
+  if (!value) return null;
+  const d = new Date(String(value));
+  if (Number.isNaN(d.getTime())) return null;
   return d;
 }
 
-function formatShortDate(d: Date) {
-  const day = pad2(d.getDate());
-  const mon = d.toLocaleString("en-GB", { month: "short" });
-  return `${day} ${mon}`;
+function formatDateShort(d: Date) {
+  return d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
 }
 
-function addMonths(d: Date, n: number) {
-  const out = new Date(d);
-  out.setMonth(out.getMonth() + n);
-  return out;
-}
-function addYears(d: Date, n: number) {
-  const out = new Date(d);
-  out.setFullYear(out.getFullYear() + n);
-  return out;
+function daysBetweenUtc(a?: Date | null, b?: Date | null) {
+  if (!a || !b) return Number.NaN;
+  const a0 = Date.UTC(a.getFullYear(), a.getMonth(), a.getDate());
+  const b0 = Date.UTC(b.getFullYear(), b.getMonth(), b.getDate());
+  return Math.round((b0 - a0) / (1000 * 60 * 60 * 24));
 }
 
-function rollForwardByFrequency(now: Date, base: Date, frequency: string): Date {
-  const freq = (frequency || "").toLowerCase().trim();
-  if (!freq) return base;
+function isExpiredBill(bill: any, now: Date) {
+  const autoRenew = Boolean(bill?.auto_renew ?? false);
+  const iso = autoRenew ? bill?.renewal_date : bill?.expiry_date;
+  const d = parseISODateMaybe(iso);
+  if (!d) return false;
+  return d.getTime() < now.getTime();
+}
 
-  // Supported: weekly, monthly, quarterly, yearly (legacy format uses these strings)
-  const map: Record<string, { unit: "week" | "month" | "year"; step: number }> = {
-    weekly: { unit: "week", step: 1 },
-    fortnightly: { unit: "week", step: 2 },
-    monthly: { unit: "month", step: 1 },
-    quarterly: { unit: "month", step: 3 },
-    yearly: { unit: "year", step: 1 },
-    annual: { unit: "year", step: 1 },
-  };
+function getEffectiveDueDate(bill: any, now: Date) {
+  const autoRenew = Boolean(bill?.auto_renew ?? false);
+  const iso = autoRenew ? bill?.renewal_date : bill?.expiry_date;
+  const d = parseISODateMaybe(iso);
+  if (!d) return null;
+  return d;
+}
 
-  const def = map[freq];
-  if (!def) return base;
+function formatDueLine(now: Date, due?: Date | null) {
+  if (!due) return "";
+  const diff = daysBetweenUtc(now, due);
+  if (!Number.isFinite(diff)) return "";
+  if (diff < 0) return `Expired • ${formatDateShort(due)}`;
+  if (diff === 0) return `Today • ${formatDateShort(due)}`;
+  if (diff === 1) return `Tomorrow • ${formatDateShort(due)}`;
+  if (diff <= 30) return `In ${diff} days • ${formatDateShort(due)}`;
+  return formatDateShort(due);
+}
 
-  let cursor = new Date(base);
-  // Roll forward until >= now (date-only comparison)
-  while (cursor.getTime() < now.getTime()) {
-    if (def.unit === "week") cursor = new Date(cursor.getTime() + def.step * 7 * 24 * 60 * 60 * 1000);
-    else if (def.unit === "month") cursor = addMonths(cursor, def.step);
-    else cursor = addYears(cursor, def.step);
+function formatMoneyGeneric(n: number) {
+  const v = Number.isFinite(n) ? n : 0;
+  try {
+    return v.toLocaleString(undefined, { style: "currency", currency: "GBP" });
+  } catch {
+    return `£${v.toFixed(2)}`;
   }
-  return cursor;
 }
 
-function getBillPrimaryDate(item: any, now: Date): { kind: "renews" | "expires"; date: Date } | null {
-  const auto = Boolean(item?.auto_renew ?? item?.autoRenew ?? false);
-  const renewalRaw = parseISODateMaybe(item?.renewal_date ?? item?.renewalDate);
-  const expiryRaw = parseISODateMaybe(item?.expiry_date ?? item?.expiryDate);
-  const frequency = item?.frequency ?? item?.freq ?? "";
-
-  const renewal = renewalRaw && auto ? rollForwardByFrequency(now, renewalRaw, frequency) : renewalRaw;
-  const expiry = expiryRaw;
-
-  if (auto && renewal) return { kind: "renews", date: renewal };
-  if (!auto && expiry) return { kind: "expires", date: expiry };
-
-  // Fallbacks if flag is missing
-  if (renewal) return { kind: "renews", date: renewal };
-  if (expiry) return { kind: "expires", date: expiry };
-
-  return null;
-}
-
-function daysBetween(a: Date, b: Date) {
-  const ms = b.getTime() - a.getTime();
-  return Math.round(ms / (24 * 60 * 60 * 1000));
-}
-
-function formatMoneyGeneric(amount: number) {
-  const n = Number.isFinite(amount) ? amount : 0;
-  const v = Math.round(n * 100) / 100;
-  return v.toFixed(2);
-}
-
-export default function BillsIndexScreen() {
+export default function BillsIndexRoute() {
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [items, setItems] = useState<BillRow[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [sortMode, setSortMode] = useState<SortMode>("due");
+  const [sortMode, setSortMode] = useState<SortMode>("next");
 
   const now = useMemo(() => new Date(), [items.length, sortMode, loading, refreshing]);
 
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
-      setLoadError(null);
-      const rows = await listBills();
-      setItems(rows ?? []);
+      const next = await listBills();
+      setItems(Array.isArray(next) ? next : []);
     } catch (e: any) {
-      setLoadError(e?.message ?? "Failed to load bills");
+      setLoadError(e?.message ?? "Failed to load bills.");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      load();
-      return () => {};
-    }, [load])
-  );
+  useEffect(() => {
+    load();
+  }, [load]);
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     load();
   }, [load]);
 
+  const openCreate = useCallback(() => {
+    router.push({ pathname: "/bills/form", params: { mode: "create" } });
+  }, []);
+
+  const openEdit = useCallback((billId: string) => {
+    router.push({ pathname: "/bills/form", params: { mode: "edit", billId } });
+  }, []);
+
   const itemsSorted = useMemo(() => {
     const base = [...items];
+
     if (sortMode === "az") {
-      base.sort((a: any, b: any) => String(a?.name ?? "").localeCompare(String(b?.name ?? ""), "en"));
+      base.sort((a: any, b: any) =>
+        String(a?.name ?? "").localeCompare(String(b?.name ?? ""), undefined, { sensitivity: "base" })
+      );
       return base;
     }
 
-    // due sort: nearest primary date first, unknowns last
     base.sort((a: any, b: any) => {
-      const pa = getBillPrimaryDate(a, now);
-      const pb = getBillPrimaryDate(b, now);
-      if (!pa && !pb) return 0;
-      if (!pa) return 1;
-      if (!pb) return -1;
-      return pa.date.getTime() - pb.date.getTime();
+      const aExpired = isExpiredBill(a, now);
+      const bExpired = isExpiredBill(b, now);
+      if (aExpired !== bExpired) return aExpired ? 1 : -1;
+
+      const da = getEffectiveDueDate(a, now);
+      const db = getEffectiveDueDate(b, now);
+      const ta = da ? da.getTime() : Number.POSITIVE_INFINITY;
+      const tb = db ? db.getTime() : Number.POSITIVE_INFINITY;
+      if (ta !== tb) return ta - tb;
+
+      return String(a?.name ?? "").localeCompare(String(b?.name ?? ""), undefined, { sensitivity: "base" });
     });
+
     return base;
-  }, [items, sortMode, now]);
+  }, [items, now, sortMode]);
 
-  const stats = useMemo(() => {
-    const total = items.length;
-    let next: { label: string; days: number; date: Date } | null = null;
-
-    for (const it of items) {
-      const p = getBillPrimaryDate(it, now);
-      if (!p) continue;
-      const d = daysBetween(now, p.date);
-      if (d < 0) continue;
-      const label = `${p.kind === "renews" ? "Renews" : "Expires"} ${formatShortDate(p.date)}`;
-      if (!next || d < next.days) next = { label, days: d, date: p.date };
-    }
-
-    return { total, nextLabel: next?.label ?? "None scheduled" };
-  }, [items, now]);
-
-  const showEmpty = !loading && items.length === 0 && !loadError;
-
-  const openLegacyBills = () => {
-    router.push({ pathname: "/legacy", params: { to: "Bills" } });
-  };
-
-  const Header = (
-    <View style={styles.headerWrap}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.title}>Bills</Text>
-          <Text style={styles.subtitle}>Keep your family’s bills synchronised.</Text>
+  const header = useMemo(() => {
+    return (
+      <View style={{ marginBottom: 12 }}>
+        <View style={styles.headerRow}>
+          <Text style={styles.h1}>Bills</Text>
+          <TouchableOpacity onPress={openCreate} activeOpacity={0.85} style={styles.addBtn}>
+            <Ionicons name="add" size={18} color="#FFFFFF" />
+            <Text style={styles.addBtnText}>Add</Text>
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity onPress={openLegacyBills} style={styles.legacyPill} activeOpacity={0.88}>
-          <Ionicons name="swap-horizontal-outline" size={16} color={stylesVars.ink} />
-          <Text style={styles.legacyPillText}>Legacy</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.statsRow}>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Total</Text>
-          <Text style={styles.statValue}>{stats.total}</Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>Next</Text>
-          <Text style={styles.statValueSmall} numberOfLines={1}>
-            {stats.nextLabel}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.controlsRow}>
-        <View style={styles.segment}>
+        <View style={styles.sortPill}>
           <TouchableOpacity
-            style={[styles.segmentBtn, sortMode === "due" && styles.segmentBtnActive]}
-            onPress={() => setSortMode("due")}
+            activeOpacity={0.85}
+            onPress={() => setSortMode("next")}
+            style={[styles.sortItem, sortMode === "next" && styles.sortItemActive]}
           >
-            <Text style={[styles.segmentText, sortMode === "due" && styles.segmentTextActive]}>Due</Text>
+            <Text style={[styles.sortText, sortMode === "next" && styles.sortTextActive]}>Next up</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.segmentBtn, sortMode === "az" && styles.segmentBtnActive]}
+            activeOpacity={0.85}
             onPress={() => setSortMode("az")}
+            style={[styles.sortItem, sortMode === "az" && styles.sortItemActive]}
           >
-            <Text style={[styles.segmentText, sortMode === "az" && styles.segmentTextActive]}>A–Z</Text>
+            <Text style={[styles.sortText, sortMode === "az" && styles.sortTextActive]}>A–Z</Text>
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={styles.addBtn}
-          onPress={() => {
-            Alert.alert(
-              "Bills form not migrated yet",
-              "For now, add/edit bills in the Legacy Bills screen.",
-              [
-                { text: "Cancel", style: "cancel" },
-                { text: "Open Legacy Bills", onPress: openLegacyBills },
-              ]
-            );
-          }}
-        >
-          <Ionicons name="add" size={18} color="#fff" />
-          <Text style={styles.addBtnText}>Add</Text>
-        </TouchableOpacity>
+        {loadError ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>Couldn’t load bills</Text>
+            <Text style={styles.errorBody}>{loadError}</Text>
+            <TouchableOpacity activeOpacity={0.85} onPress={load} style={styles.errorCta}>
+              <Text style={styles.errorCtaText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </View>
+    );
+  }, [load, loadError, openCreate, sortMode]);
 
-      {loadError ? (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{loadError}</Text>
-          <TouchableOpacity onPress={load} style={styles.retryBtn}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-    </View>
+  const renderItem = useCallback(
+    ({ item }: { item: any }) => {
+      const expired = isExpiredBill(item, now);
+      const due = getEffectiveDueDate(item, now);
+      const dueLine = formatDueLine(now, due);
+
+      return (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => openEdit(String(item?.id))}
+          style={[styles.tile, expired && styles.tileExpired]}
+        >
+          <View style={{ flex: 1, paddingRight: 10 }}>
+            <Text style={[styles.tileTitle, expired && styles.tileTitleExpired]} numberOfLines={1}>
+              {String(item?.name ?? "")}
+            </Text>
+
+            {!!dueLine && (
+              <Text style={[styles.tileSub, expired && styles.tileSubExpired]} numberOfLines={1}>
+                {dueLine}
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.tileRight}>
+            <Text style={[styles.tileAmount, expired && styles.tileAmountExpired]} numberOfLines={1}>
+              {formatMoneyGeneric(Number(item?.amount ?? 0))}
+            </Text>
+            <Ionicons name="chevron-forward" size={18} color={expired ? vars.inkFaint : vars.inkMuted} />
+          </View>
+        </TouchableOpacity>
+      );
+    },
+    [now, openEdit]
   );
 
   if (loading) {
     return (
       <View style={[styles.screen, styles.center]}>
         <ActivityIndicator />
-        <Text style={styles.loadingText}>Loading bills…</Text>
       </View>
     );
   }
 
-  if (showEmpty) {
-    return (
-      <View style={styles.screen}>
-        {Header}
-        <View style={styles.emptyWrap}>
-          <View style={styles.emptyCard}>
-            <Ionicons name="receipt-outline" size={24} color={stylesVars.inkMuted} />
-            <Text style={styles.emptyTitle}>No bills added yet</Text>
-            <Text style={styles.emptyBody}>
-              Add your regular bills so your family can keep track of what’s renewing and what’s expiring.
-            </Text>
-
-            <TouchableOpacity style={styles.emptyAction} onPress={openLegacyBills}>
-              <Ionicons name="add" size={18} color="#fff" />
-              <Text style={styles.emptyActionText}>Add bills (Legacy)</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    );
-  }
+  const showEmpty = !loadError && itemsSorted.length === 0;
 
   return (
     <View style={styles.screen}>
-      <FlatList
-        data={itemsSorted}
-        keyExtractor={(it: any) => String(it?.id)}
-        ListHeaderComponent={Header}
-        contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        renderItem={({ item }) => {
-          const primary = getBillPrimaryDate(item as any, now);
-          const primaryLabel = primary
-            ? `${primary.kind === "renews" ? "Renews" : "Expires"} ${formatShortDate(primary.date)}`
-            : "Date not set";
+      {showEmpty ? (
+        <View style={styles.emptyWrap}>
+          <View style={styles.emptyIconBig}>
+            <Ionicons name="receipt-outline" size={34} color={vars.ink} />
+          </View>
+          <Text style={styles.emptyTitle}>No bills yet</Text>
+          <Text style={styles.emptyBody}>Add bills to keep everything in sync.</Text>
 
-          const days = primary ? daysBetween(now, primary.date) : null;
-          const isSoon = typeof days === "number" && days >= 0 && days <= 7;
-          const isOverdue = typeof days === "number" && days < 0;
-
-          const cost = (item as any)?.cost ?? (item as any)?.amount ?? null;
-          const costLabel = cost != null ? formatMoneyGeneric(Number(cost)) : null;
-
-          return (
-            <TouchableOpacity
-              activeOpacity={0.88}
-              style={styles.row}
-              onPress={openLegacyBills}
-            >
-              <View style={styles.rowLeft}>
-                <Text style={styles.rowTitle} numberOfLines={1}>
-                  {(item as any)?.name ?? "Bill"}
-                </Text>
-                <Text style={styles.rowSub} numberOfLines={1}>
-                  {primaryLabel}
-                  {isSoon ? " • Soon" : isOverdue ? " • Overdue" : ""}
-                </Text>
-              </View>
-
-              <View style={styles.rowRight}>
-                {costLabel ? <Text style={styles.rowAmount}>{costLabel}</Text> : null}
-                <Ionicons name="chevron-forward" size={18} color={stylesVars.inkMuted} />
-              </View>
-            </TouchableOpacity>
-          );
-        }}
-      />
+          <TouchableOpacity activeOpacity={0.85} onPress={openCreate} style={styles.emptyCta}>
+            <Ionicons name="add" size={18} color="#FFFFFF" />
+            <Text style={styles.emptyCtaText}>Add bill</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={itemsSorted}
+          keyExtractor={(it) => String((it as any).id)}
+          renderItem={renderItem}
+          ListHeaderComponent={header}
+          contentContainerStyle={{ paddingBottom: 18 }}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </View>
   );
 }
 
-const stylesVars = {
-  ink: "#101828",
-  inkMuted: "#667085",
-  card: "rgba(255,255,255,0.92)",
-  border: "rgba(220,223,232,0.75)",
-  shadow: "rgba(16,24,40,0.06)",
+const vars = {
+  bg: "#F6F7F9",
+  ink: "#111827",
+  inkMuted: "#6B7280",
+  inkFaint: "#9CA3AF",
+  card: "#FFFFFF",
+  border: "#E5E7EB",
 };
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: "#F4F6FA" },
-  center: { justifyContent: "center", alignItems: "center" },
-  loadingText: { marginTop: 10, fontWeight: "700", color: stylesVars.inkMuted },
+  screen: { flex: 1, backgroundColor: vars.bg, padding: 14 },
+  center: { alignItems: "center", justifyContent: "center" },
 
-  headerWrap: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 10 },
-  headerRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between" },
-  headerLeft: { flex: 1, paddingRight: 10 },
-  title: { fontSize: 28, fontWeight: "900", color: stylesVars.ink, letterSpacing: -0.2 },
-  subtitle: { marginTop: 4, fontSize: 13, fontWeight: "700", color: stylesVars.inkMuted },
-
-  legacyPill: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: stylesVars.card,
-    borderWidth: 1,
-    borderColor: stylesVars.border,
-  },
-  legacyPillText: { fontWeight: "800", color: stylesVars.ink },
-
-  statsRow: { flexDirection: "row", gap: 10, marginTop: 12 },
-  statBox: {
-    flex: 1,
-    backgroundColor: stylesVars.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: stylesVars.border,
-    padding: 12,
-  },
-  statLabel: { fontSize: 12, fontWeight: "800", color: stylesVars.inkMuted },
-  statValue: { marginTop: 6, fontSize: 22, fontWeight: "900", color: stylesVars.ink },
-  statValueSmall: { marginTop: 6, fontSize: 14, fontWeight: "900", color: stylesVars.ink },
-
-  controlsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 12 },
-  segment: {
-    flexDirection: "row",
-    backgroundColor: stylesVars.card,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: stylesVars.border,
-    overflow: "hidden",
-  },
-  segmentBtn: { paddingVertical: 10, paddingHorizontal: 14 },
-  segmentBtnActive: { backgroundColor: "rgba(16,24,40,0.06)" },
-  segmentText: { fontWeight: "800", color: stylesVars.inkMuted },
-  segmentTextActive: { color: stylesVars.ink },
+  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  h1: { fontSize: 20, fontWeight: "900", color: vars.ink },
 
   addBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: "#111827",
+    backgroundColor: vars.ink,
     borderRadius: 14,
-    paddingVertical: 10,
+    paddingVertical: 9,
     paddingHorizontal: 12,
   },
-  addBtnText: { color: "#fff", fontWeight: "900" },
+  addBtnText: { color: "#FFFFFF", fontWeight: "900", fontSize: 13 },
+
+  sortPill: {
+    flexDirection: "row",
+    borderWidth: 1,
+    borderColor: vars.border,
+    borderRadius: 999,
+    overflow: "hidden",
+    backgroundColor: vars.card,
+    alignSelf: "center",
+  },
+  sortItem: { paddingVertical: 8, paddingHorizontal: 12 },
+  sortItemActive: { backgroundColor: vars.ink },
+  sortText: { fontSize: 12, fontWeight: "900", color: vars.inkMuted },
+  sortTextActive: { color: "#FFFFFF" },
+
+  tile: {
+    backgroundColor: vars.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: vars.border,
+    padding: 12,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  tileExpired: { opacity: 0.55 },
+  tileTitle: { fontSize: 15, fontWeight: "900", color: vars.ink },
+  tileTitleExpired: { color: vars.inkMuted },
+  tileSub: { marginTop: 6, fontSize: 12, fontWeight: "800", color: vars.inkMuted },
+  tileSubExpired: { color: vars.inkMuted },
+  tileRight: { alignItems: "flex-end" },
+  tileAmount: { fontSize: 14, fontWeight: "900", color: vars.ink },
+  tileAmountExpired: { color: vars.inkMuted },
+
+  emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: 30 },
+  emptyIconBig: {
+    width: 64,
+    height: 64,
+    borderRadius: 24,
+    backgroundColor: vars.card,
+    borderWidth: 1,
+    borderColor: vars.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyTitle: { marginTop: 14, fontSize: 20, fontWeight: "900", color: vars.ink },
+  emptyBody: { marginTop: 8, fontSize: 14, fontWeight: "700", color: vars.inkMuted, lineHeight: 20, textAlign: "center" },
+  emptyCta: {
+    marginTop: 14,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: vars.ink,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  emptyCtaText: { fontSize: 14, fontWeight: "900", color: "#FFFFFF" },
 
   errorBox: {
     marginTop: 12,
-    padding: 12,
-    borderRadius: 14,
-    backgroundColor: "rgba(239,68,68,0.08)",
+    backgroundColor: vars.card,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: "rgba(239,68,68,0.25)",
-  },
-  errorText: { fontWeight: "800", color: "#991B1B" },
-  retryBtn: { marginTop: 10, alignSelf: "flex-start" },
-  retryText: { fontWeight: "900", color: "#111827" },
-
-  listContent: { paddingBottom: 20 },
-  row: {
-    marginHorizontal: 18,
-    marginTop: 10,
+    borderColor: vars.border,
     padding: 14,
-    borderRadius: 18,
-    backgroundColor: stylesVars.card,
-    borderWidth: 1,
-    borderColor: stylesVars.border,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
   },
-  rowLeft: { flex: 1, paddingRight: 12 },
-  rowTitle: { fontSize: 14, fontWeight: "900", color: stylesVars.ink },
-  rowSub: { marginTop: 4, fontSize: 13, fontWeight: "700", color: stylesVars.inkMuted },
-  rowRight: { flexDirection: "row", alignItems: "center", gap: 8 },
-  rowAmount: { fontWeight: "900", color: stylesVars.ink },
-
-  emptyWrap: { paddingHorizontal: 18, paddingTop: 10, flex: 1 },
-  emptyCard: {
-    borderRadius: 18,
-    backgroundColor: stylesVars.card,
-    borderWidth: 1,
-    borderColor: stylesVars.border,
-    padding: 16,
-  },
-  emptyTitle: { marginTop: 10, fontSize: 16, fontWeight: "900", color: stylesVars.ink },
-  emptyBody: { marginTop: 6, fontSize: 13, fontWeight: "700", color: stylesVars.inkMuted, lineHeight: 18 },
-  emptyAction: {
-    marginTop: 14,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    alignSelf: "flex-start",
-    backgroundColor: "#111827",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-  },
-  emptyActionText: { color: "#fff", fontWeight: "900" },
+  errorTitle: { fontSize: 16, fontWeight: "900", color: vars.ink },
+  errorBody: { marginTop: 6, fontSize: 13, fontWeight: "700", color: vars.inkMuted, lineHeight: 18 },
+  errorCta: { marginTop: 12, backgroundColor: vars.ink, borderRadius: 14, paddingVertical: 10, alignItems: "center" },
+  errorCtaText: { fontSize: 14, fontWeight: "900", color: "#FFFFFF" },
 });
