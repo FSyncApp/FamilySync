@@ -57,6 +57,7 @@ export default function TaskFormScreen() {
 
   const [loading, setLoading] = useState<boolean>(isEdit);
   const [saving, setSaving] = useState<boolean>(false);
+  const [isEditing, setIsEditing] = useState(!isEdit);
 
   const [title, setTitle] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
@@ -96,8 +97,13 @@ export default function TaskFormScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({
       title: isEdit ? "Task" : "New task",
+      headerRight: isEdit ? () => (
+        <TouchableOpacity onPress={confirmDelete} style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+          <Ionicons name="trash-outline" size={22} color={vars.danger} />
+        </TouchableOpacity>
+      ) : undefined,
     });
-  }, [navigation, isEdit]);
+  }, [navigation, isEdit, confirmDelete]);
 
   useEffect(() => {
     let alive = true;
@@ -178,8 +184,10 @@ export default function TaskFormScreen() {
 
   const openAssignee = useCallback(() => {
     if (saving) return;
+    // Existing tasks open in view-mode until user taps Edit.
+    if (isEdit && !isEditing) return;
     setAssigneeOpen(true);
-  }, [saving]);
+  }, [saving, isEdit, isEditing]);
 
   const chooseAssignee = useCallback(
     (value: string) => {
@@ -302,7 +310,7 @@ export default function TaskFormScreen() {
           <Text style={styles.label}>Task</Text>
           <TextInput
             value={title}
-            onChangeText={setTitle}
+            onChangeText={setTitle} editable={isEditing}
             placeholder="What needs doing?"
             placeholderTextColor="rgba(107,114,128,0.85)"
             style={styles.input}
@@ -329,7 +337,7 @@ export default function TaskFormScreen() {
           <Text style={styles.label}>Notes</Text>
           <TextInput
             value={notes}
-            onChangeText={setNotes}
+            onChangeText={setNotes} editable={isEditing}
             placeholder="Anything useful…"
             placeholderTextColor="rgba(107,114,128,0.85)"
             style={[styles.input, styles.notes]}
@@ -365,7 +373,7 @@ export default function TaskFormScreen() {
             <View style={{ marginTop: 10 }}>
               <TextInput
                 value={otherName}
-                onChangeText={setOtherName}
+                onChangeText={setOtherName} editable={isEditing}
                 placeholder="Other…"
                 placeholderTextColor="rgba(107,114,128,0.85)"
                 style={styles.input}
@@ -383,7 +391,7 @@ export default function TaskFormScreen() {
             <Switch
               value={hasDue ? calendarSyncRequested : false}
               onValueChange={onToggleCalendar}
-              disabled={!hasDue}
+              disabled={!hasDue || (isEdit && !isEditing)}
               trackColor={{ false: "rgba(209,213,219,0.9)", true: vars.iosBlue }}
               ios_backgroundColor="rgba(209,213,219,0.9)"
             />
@@ -396,7 +404,7 @@ export default function TaskFormScreen() {
             <Switch
               value={hasDue ? reminderEnabled : false}
               onValueChange={onToggleReminder}
-              disabled={!hasDue}
+              disabled={!hasDue || (isEdit && !isEditing)}
               trackColor={{ false: "rgba(209,213,219,0.9)", true: vars.iosBlue }}
               ios_backgroundColor="rgba(209,213,219,0.9)"
             />
@@ -417,15 +425,6 @@ export default function TaskFormScreen() {
               </TouchableOpacity>
             </View>
           ) : null}
-
-          {isEdit ? (
-            <View style={{ marginTop: 12 }}>
-              <TouchableOpacity activeOpacity={0.85} onPress={confirmDelete} style={styles.deleteBtn}>
-                <Ionicons name="trash-outline" size={16} color={vars.danger} />
-                <Text style={styles.deleteText}>Delete task</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
         </View>
 
         <View style={{ height: 86 }} />
@@ -443,11 +442,11 @@ export default function TaskFormScreen() {
 
         <TouchableOpacity
           activeOpacity={0.9}
-          onPress={onSave}
-          disabled={!canSave || saving}
-          style={[styles.bottomBtn, (!canSave || saving) && styles.bottomBtnDisabled]}
+          onPress={isEdit && !isEditing ? () => setIsEditing(true) : onSave}
+          disabled={(isEdit && !isEditing) ? saving : (!canSave || saving)}
+          style={[styles.bottomBtn, ((isEdit && !isEditing) ? saving : (!canSave || saving)) && styles.bottomBtnDisabled]}
         >
-          <Text style={styles.bottomText}>{isEdit ? "Save" : "Add task"}</Text>
+          <Text style={styles.bottomText}>{isEdit ? (isEditing ? "Save" : "Edit") : "Add task"}</Text>
         </TouchableOpacity>
       </View>
 

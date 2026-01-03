@@ -1,12 +1,12 @@
 import React from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import TasksListScreen from "../../migration_src/client/screens/tasks/TasksListScreen";
+import TaskFormScreen from "../../migration_src/client/screens/tasks/TaskFormScreen";
 
-export default function TasksIndex() {
+export default function TaskFormCompatRoute() {
   return (
     <SafeAreaView style={{ flex: 1 }} edges={["bottom"]}>
-      <TasksListScreen />
+      <TaskFormScreen />
     </SafeAreaView>
   );
 }
