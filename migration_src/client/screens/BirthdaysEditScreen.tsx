@@ -59,7 +59,17 @@ export default function BirthdaysEditScreen() {
       dateYYYYMMDD,
     });
 
-    navigation.goBack();
+// After adding a NEW birthday, switch to the "All (A–Z)" tab so the user can immediately see it,
+// even if it's outside the "Next up (60 days)" window.
+if (!existing?.id) {
+  navigation.reset({
+    index: 0,
+    routes: [{ name: "Birthdays" as any, params: { showAll: true } as any }],
+  } as any);
+  return;
+}
+
+navigation.goBack();
   };
 
   return (
