@@ -154,17 +154,13 @@ export default function HomeScreen() {
     };
   }, []);
 
-  const onMenuPress = () => router.push("/legacy");
+  const onMenuPress = () => router.push({ pathname: "/legacy", params: { to: item.label } });
 
   const onShortcutPress = (item: ShortcutItem) => {
-    // Bills is now Router-native.
-    if (item.label === "Bills") {
-      router.push("/bills");
-      return;
-    }
-
-    // Everything else stays in legacy for now (deep-link to label where possible).
+    // Phase 1 routing: everything routes to legacy for now
+    // (Legacy will open on its Home tab — expected.)
     router.push({ pathname: "/legacy", params: { to: item.label } });
+    // If you ever want “Coming soon” behaviour again, we can re-add it here.
   };
 
   return (
