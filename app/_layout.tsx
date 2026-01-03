@@ -18,21 +18,21 @@ export default function RootLayout() {
         {/* Bottom tabs (Home / Calendar / Messages / Settings) */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
 
-        {/* Bannerless legacy bridges */}
+        {/* Bannerless native/bridge stacks */}
         <Stack.Screen name="bills" options={{ headerShown: false }} />
         <Stack.Screen name="bills/form" options={{ headerShown: false }} />
         <Stack.Screen name="calendar" options={{ headerShown: false }} />
         <Stack.Screen name="tasks" options={{ headerShown: false }} />
         <Stack.Screen name="messages" options={{ headerShown: false }} />
 
+        {/* Birthdays (router-native stack) */}
+        <Stack.Screen name="birthdays" options={{ headerShown: false }} />
+
         {/* Legacy container screen (with banner) */}
         <Stack.Screen name="legacy" options={{ headerShown: false }} />
 
         {/* Keep modal behavior */}
-        <Stack.Screen
-          name="modal"
-          options={{ presentation: "modal", title: "Modal" }}
-        />
+        <Stack.Screen name="modal" options={{ presentation: "modal", title: "Modal" }} />
       </Stack>
 
       <StatusBar style="auto" />

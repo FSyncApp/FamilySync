@@ -175,6 +175,12 @@ export default function HomeScreen() {
     return;
   }
 
+  // Birthdays is now Router-native.
+  if (item.label === "Birthdays") {
+    router.push("/birthdays");
+    return;
+  }
+
   // Everything else stays in legacy for now (deep-link to label where possible).
   router.push({ pathname: "/legacy", params: { to: item.label } });
 };
