@@ -14,11 +14,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 
-import DatePickerModal, {
-  formatYYYYMMDD,
-  parseYYYYMMDD,
-  formatDisplayFromYYYYMMDD,
-} from "../components/DatePickerModal";
+import DateField from "../components/DateField";
 
 import { upsertBirthday, type Birthday } from "../data/birthdaysStore";
 import type { HomeStackParamList } from "../navigation/HomeStack";
@@ -34,33 +30,26 @@ export default function BirthdaysEditScreen() {
 
   const [name, setName] = React.useState(existing?.name ?? "");
   const [relationship, setRelationship] = React.useState(existing?.relationship ?? "");
-  const [dateYYYYMMDD, setDateYYYYMMDD] = React.useState(
-    existing?.dateYYYYMMDD ?? formatYYYYMMDD(new Date())
-  );
-
-  const [pickerVisible, setPickerVisible] = React.useState(false);
-
-  const initialDate = React.useMemo(() => {
-    const parsed = parseYYYYMMDD(dateYYYYMMDD);
-    return parsed ?? new Date();
-  }, [dateYYYYMMDD]);
-
-  const onSave = () => {
+    const [dateYYYYMMDD, setDateYYYYMMDD] = React.useState(existing?.dateYYYYMMDD ?? "");  const onSave = () => {
     const trimmed = name.trim();
     if (!trimmed) {
       Alert.alert("Missing name", "Please enter a name.");
       return;
     }
 
-    upsertBirthday({
-      id: existing?.id, // IMPORTANT: preserves edit vs new
+const dateTrimmed = dateYYYYMMDD.trim();
+if (!dateTrimmed) {
+  Alert.alert("Missing date", "Please select a birthday date.");
+  return;
+}
+
+upsertBirthday({
+      id: existing?.id ?? String(Date.now()), // preserves edit vs new (generate for new)
       name: trimmed,
       relationship: relationship.trim() || undefined,
-      dateYYYYMMDD,
+      dateYYYYMMDD: dateTrimmed,
     });
 
-// After adding a NEW birthday, switch to the "All (A–Z)" tab so the user can immediately see it,
-// even if it's outside the "Next up (60 days)" window.
 if (!existing?.id) {
   navigation.reset({
     index: 0,
@@ -108,17 +97,14 @@ navigation.goBack();
           <View style={styles.spacer} />
 
           <Text style={styles.label}>Date</Text>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Select date"
-            onPress={() => setPickerVisible(true)}
-            activeOpacity={0.85}
-            style={styles.dateButton}
-          >
-            <Ionicons name="calendar-outline" size={18} color={vars.inkMuted} />
-            <Text style={styles.dateText}>{formatDisplayFromYYYYMMDD(dateYYYYMMDD)}</Text>
-            <Ionicons name="chevron-down" size={16} color={vars.inkMuted} />
-          </TouchableOpacity>
+          <DateField
+  value={dateYYYYMMDD}
+  onChange={setDateYYYYMMDD}
+  editable
+  allowClear
+  hideLabel
+  placeholder="dd/mm/yyyy"
+/>
 
           <View style={styles.actions}>
             <TouchableOpacity
@@ -133,19 +119,7 @@ navigation.goBack();
           </View>
         </View>
       </ScrollView>
-
-      <DatePickerModal
-        visible={pickerVisible}
-        title="Select date"
-        initialDate={initialDate}
-        maximumDate={new Date()}
-        onCancel={() => setPickerVisible(false)}
-        onConfirm={(d) => {
-          setPickerVisible(false);
-          setDateYYYYMMDD(formatYYYYMMDD(d));
-        }}
-      />
-    </SafeAreaView>
+</SafeAreaView>
   );
 }
 
