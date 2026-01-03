@@ -1,5 +1,5 @@
 import { Redirect } from "expo-router";
 
 export default function MessagesTab() {
-  return <Redirect href={{ pathname: "/legacy", params: { to: "Messages" } }} />;
+  return <Redirect href="/messages" />;
 }
