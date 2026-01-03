@@ -157,21 +157,27 @@ export default function HomeScreen() {
   const onMenuPress = () => router.push("/legacy");
 
   const onShortcutPress = (item: ShortcutItem) => {
-    // Calendar is now Router-native.
-    if (item.label === "Calendar") {
-      router.push("/calendar");
-      return;
-    }
+  // Calendar is now Router-native.
+  if (item.label === "Calendar") {
+    router.push("/calendar");
+    return;
+  }
 
-// Bills is now Router-native.
-    if (item.label === "Bills") {
-      router.push("/bills");
-      return;
-    }
+  // Tasks is now Router-native.
+  if (item.label === "Tasks") {
+    router.push("/tasks");
+    return;
+  }
 
-    // Everything else stays in legacy for now (deep-link to label where possible).
-    router.push({ pathname: "/legacy", params: { to: item.label } });
-  };
+  // Bills is now Router-native.
+  if (item.label === "Bills") {
+    router.push("/bills");
+    return;
+  }
+
+  // Everything else stays in legacy for now (deep-link to label where possible).
+  router.push({ pathname: "/legacy", params: { to: item.label } });
+};
 
   return (
     <SafeAreaView style={styles.safe}>

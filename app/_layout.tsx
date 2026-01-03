@@ -15,14 +15,16 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
       <Stack>
-        {/* Bottom tabs (Home/Calendar/Messages/Settings) */}
+        {/* Bottom tabs (Home / Calendar / Messages / Settings) */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
 
-        {/* Hide the Router Stack header for migrated routes */}
+        {/* Bannerless legacy bridges */}
         <Stack.Screen name="bills" options={{ headerShown: false }} />
         <Stack.Screen name="bills/form" options={{ headerShown: false }} />
+        <Stack.Screen name="calendar" options={{ headerShown: false }} />
+        <Stack.Screen name="tasks" options={{ headerShown: false }} />
 
-        {/* Legacy container screen should manage its own header/banner */}
+        {/* Legacy container screen (with banner) */}
         <Stack.Screen name="legacy" options={{ headerShown: false }} />
 
         {/* Keep modal behavior */}
