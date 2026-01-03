@@ -1,4 +1,5 @@
 import * as React from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type Birthday = {
   id: string;
@@ -13,11 +14,15 @@ export type Birthday = {
 
 type Listener = () => void;
 
-let birthdays: Birthday[] = [
+const STORAGE_KEY = "familysync_birthdays_v1";
+
+const DEFAULT_BIRTHDAYS: Birthday[] = [
   { id: "b1", name: "Emma", relationship: "Daughter", dateYYYYMMDD: "2021-12-30" },
   { id: "b2", name: "Nana", relationship: "Grandmother", dateYYYYMMDD: "1952-01-14" },
   { id: "b3", name: "Mark", relationship: "Dad", dateYYYYMMDD: "1989-06-07" },
 ];
+
+let birthdays: Birthday[] = DEFAULT_BIRTHDAYS;
 
 const listeners = new Set<Listener>();
 
@@ -30,6 +35,46 @@ function emit() {
     }
   });
 }
+
+function isBirthdayLike(x: any): x is Birthday {
+  return (
+    x &&
+    typeof x === "object" &&
+    typeof x.id === "string" &&
+    typeof x.name === "string" &&
+    typeof x.dateYYYYMMDD === "string" &&
+    (x.relationship === undefined || typeof x.relationship === "string")
+  );
+}
+
+async function persistBirthdays(next: Birthday[]) {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    // ignore persistence failures (demo mode)
+  }
+}
+
+async function hydrateOnce() {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+
+    const cleaned = parsed.filter(isBirthdayLike) as Birthday[];
+    if (!cleaned.length) return;
+
+    birthdays = cleaned;
+    emit();
+  } catch {
+    // ignore; keep defaults
+  }
+}
+
+// Fire-and-forget hydration. Safe in React Native environment.
+hydrateOnce();
 
 /**
  * Canonical subscription API.
@@ -57,6 +102,7 @@ export function getBirthdaysList(): Birthday[] {
 export function setBirthdays(next: Birthday[]) {
   birthdays = next;
   emit();
+  persistBirthdays(birthdays);
 }
 
 /** Update by id if it exists, otherwise insert. */
@@ -68,6 +114,7 @@ export function upsertBirthday(b: Birthday) {
     birthdays = [b, ...birthdays];
   }
   emit();
+  persistBirthdays(birthdays);
 }
 
 export function removeBirthday(id: string) {
@@ -75,6 +122,7 @@ export function removeBirthday(id: string) {
   if (next.length !== birthdays.length) {
     birthdays = next;
     emit();
+    persistBirthdays(birthdays);
   }
 }
 
