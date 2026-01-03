@@ -1,0 +1,49 @@
+import React, { useMemo } from "react";
+import { View, Text, StyleSheet, Image } from "react-native";
+
+type Props = {
+  name?: string;
+  uri?: string | null;
+  size?: number;
+};
+
+/**
+ * Phase 2.1.2r — Avatar polish
+ * - If no name AND no photo, show a simple camera glyph instead of "YO"/initials.
+ * - As soon as the user starts typing a name, initials appear.
+ */
+export default function Avatar({ name, uri, size = 56 }: Props) {
+  const initials = useMemo(() => {
+    const n = (name ?? "").trim();
+    if (!n) return "";
+    const parts = n.split(/\s+/).filter(Boolean);
+    const a = parts[0]?.[0] ?? "";
+    const b = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
+    return (a + b).toUpperCase();
+  }, [name]);
+
+  const showCamera = !uri && !initials;
+
+  return (
+    <View style={[styles.wrap, { width: size, height: size, borderRadius: size / 2 }]}>
+      {uri ? (
+        <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />
+      ) : showCamera ? (
+        <Text style={[styles.camera, { fontSize: Math.round(size * 0.42) }]}>📷</Text>
+      ) : (
+        <Text style={[styles.text, { fontSize: Math.round(size * 0.34) }]}>{initials}</Text>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  wrap: {
+    backgroundColor: "#F3F4F6",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  text: { fontWeight: "900", color: "#111827" },
+  camera: { fontWeight: "800", opacity: 0.78 },
+});

@@ -1,0 +1,307 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Modal,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  LayoutChangeEvent,
+  PanResponder,
+} from "react-native";
+import * as ImageManipulator from "expo-image-manipulator";
+
+/**
+ * Phase 2.1.2l — No-dim overlay (canon fallback)
+ * - Removes dimming entirely to avoid artifacts ("star"/seams) on different pixel densities.
+ * - Keeps a clean circular guide stroke.
+ * - Drag with 1 finger.
+ * - Pinch with 2 fingers (no extra deps).
+ * - Crop to the circle bounding square ("hole") so the final avatar is always fully filled.
+ */
+
+export type CircularCropperModalProps = {
+  visible: boolean;
+  uri: string | null;
+  title?: string;
+  onCancel: () => void;
+  onDone: (resultUri: string) => void;
+};
+
+type ImgSize = { w: number; h: number };
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function makeEven(n: number) {
+  const i = Math.round(n);
+  return i % 2 === 0 ? i : i - 1;
+}
+
+export default function CircularCropperModal({ visible, uri, title, onCancel, onDone }: CircularCropperModalProps) {
+  const [frame, setFrame] = useState(300);
+  const [imgSize, setImgSize] = useState<ImgSize | null>(null);
+
+  const [userScale, setUserScale] = useState(1);
+  const [tx, setTx] = useState(0);
+  const [ty, setTy] = useState(0);
+
+  const dragStart = useRef({ x: 0, y: 0 });
+  const pinchStart = useRef({ dist: 0, scale: 1 });
+
+  useEffect(() => {
+    if (!uri) return;
+    Image.getSize(
+      uri,
+      (w, h) => setImgSize({ w, h }),
+      () => setImgSize(null)
+    );
+  }, [uri]);
+
+  useEffect(() => {
+    if (!visible) return;
+    setUserScale(1);
+    setTx(0);
+    setTy(0);
+    pinchStart.current = { dist: 0, scale: 1 };
+  }, [visible, uri]);
+
+  // Circle bounding square (even pixel sizes avoid sub-pixel wobble)
+  const hole = useMemo(() => Math.max(220, makeEven(frame * 0.82)), [frame]);
+  const radius = hole / 2;
+
+  const baseScale = useMemo(() => {
+    if (!imgSize) return 1;
+    return Math.max(hole / imgSize.w, hole / imgSize.h);
+  }, [imgSize, hole]);
+
+  const effectiveScale = baseScale * userScale;
+
+  const clampTranslation = (nextTx: number, nextTy: number, effScale: number = effectiveScale) => {
+    if (!imgSize) return { x: nextTx, y: nextTy };
+
+    const scaledW = imgSize.w * effScale;
+    const scaledH = imgSize.h * effScale;
+
+    const maxX = Math.max(0, (scaledW - hole) / 2);
+    const maxY = Math.max(0, (scaledH - hole) / 2);
+
+    return { x: clamp(nextTx, -maxX, maxX), y: clamp(nextTy, -maxY, maxY) };
+  };
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: (evt) => {
+          dragStart.current = { x: tx, y: ty };
+          const touches = evt.nativeEvent.touches ?? [];
+          if (touches.length === 2) {
+            const [a, b] = touches;
+            const dx = a.pageX - b.pageX;
+            const dy = a.pageY - b.pageY;
+            pinchStart.current = { dist: Math.hypot(dx, dy), scale: userScale };
+          } else {
+            pinchStart.current = { dist: 0, scale: userScale };
+          }
+        },
+        onPanResponderMove: (evt, gesture) => {
+          const touches = evt.nativeEvent.touches ?? [];
+
+          if (touches.length === 2) {
+            const [a, b] = touches;
+            const dx = a.pageX - b.pageX;
+            const dy = a.pageY - b.pageY;
+            const dist = Math.hypot(dx, dy);
+
+            if (!pinchStart.current.dist) {
+              pinchStart.current = { dist, scale: userScale };
+              return;
+            }
+
+            const ratio = dist / pinchStart.current.dist;
+            const nextUserScale = clamp(pinchStart.current.scale * ratio, 1, 5);
+            const nextEff = baseScale * nextUserScale;
+
+            setUserScale(nextUserScale);
+            const next = clampTranslation(tx, ty, nextEff);
+            setTx(next.x);
+            setTy(next.y);
+            return;
+          }
+
+          const next = clampTranslation(dragStart.current.x + gesture.dx, dragStart.current.y + gesture.dy);
+          setTx(next.x);
+          setTy(next.y);
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tx, ty, userScale, imgSize, effectiveScale, hole, baseScale]
+  );
+
+  const onLayoutFrame = (e: LayoutChangeEvent) => {
+    const w = Math.round(e.nativeEvent.layout.width);
+    if (w && Math.abs(w - frame) > 2) setFrame(w);
+  };
+
+  const zoomBy = (delta: number) => {
+    const nextUserScale = clamp(+(userScale + delta).toFixed(2), 1, 5);
+    const nextEff = baseScale * nextUserScale;
+    setUserScale(nextUserScale);
+    const next = clampTranslation(tx, ty, nextEff);
+    setTx(next.x);
+    setTy(next.y);
+  };
+
+  const handleDone = async () => {
+    if (!uri || !imgSize) return;
+
+    const cropSize = hole / effectiveScale;
+    const originX = imgSize.w / 2 - cropSize / 2 - tx / effectiveScale;
+    const originY = imgSize.h / 2 - cropSize / 2 - ty / effectiveScale;
+
+    const safe = {
+      originX: Math.max(0, Math.min(imgSize.w - cropSize, originX)),
+      originY: Math.max(0, Math.min(imgSize.h - cropSize, originY)),
+      width: Math.min(imgSize.w, cropSize),
+      height: Math.min(imgSize.h, cropSize),
+    };
+
+    try {
+      const result = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ crop: safe }],
+        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      onDone(result.uri);
+    } catch {
+      onDone(uri);
+    }
+  };
+
+  // Circle placement within the square editor
+  const top = Math.round((frame - hole) / 2);
+  const left = top;
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onCancel}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onCancel} hitSlop={10}>
+            <Text style={styles.headerLink}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{title ?? "Position your photo"}</Text>
+          <TouchableOpacity onPress={handleDone} hitSlop={10}>
+            <Text style={styles.headerLink}>Done</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.editorWrap}>
+          <View style={styles.editor} onLayout={onLayoutFrame} {...panResponder.panHandlers}>
+            {uri ? (
+              <Image
+                source={{ uri }}
+                style={[
+                  styles.image,
+                  {
+                    width: imgSize ? imgSize.w * effectiveScale : hole,
+                    height: imgSize ? imgSize.h * effectiveScale : hole,
+                    transform: [{ translateX: tx }, { translateY: ty }],
+                  },
+                ]}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.placeholder}>
+                <Text style={styles.placeholderText}>No image</Text>
+              </View>
+            )}
+
+            {/* Clean circular guide (no dimming) */}
+            <View pointerEvents="none" style={[styles.circleGuide, { width: hole, height: hole, borderRadius: radius, top, left }]} />
+          </View>
+        </View>
+
+        <View style={styles.controls}>
+          <TouchableOpacity style={styles.zoomBtn} onPress={() => zoomBy(-0.25)} activeOpacity={0.85}>
+            <Text style={styles.zoomText}>−</Text>
+          </TouchableOpacity>
+          <Text style={styles.zoomLabel}>Zoom</Text>
+          <TouchableOpacity style={styles.zoomBtn} onPress={() => zoomBy(+0.25)} activeOpacity={0.85}>
+            <Text style={styles.zoomText}>+</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.hint}>Drag to position. Pinch to zoom, or use the buttons.</Text>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#0B0F19" },
+  header: {
+    paddingTop: 14,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerTitle: { color: "#FFFFFF", fontWeight: "900", fontSize: 16 },
+  headerLink: { color: "#FFFFFF", fontWeight: "800", fontSize: 15 },
+
+  editorWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
+  editor: {
+    width: "100%",
+    maxWidth: 340,
+    aspectRatio: 1,
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  image: { position: "absolute" },
+  placeholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
+  placeholderText: { color: "#9CA3AF", fontWeight: "800" },
+
+  circleGuide: {
+    position: "absolute",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.9)",
+  },
+
+  controls: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+  },
+  zoomBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomText: { color: "#FFFFFF", fontWeight: "900", fontSize: 22, marginTop: -1 },
+  zoomLabel: { color: "#E5E7EB", fontWeight: "800" },
+
+  hint: {
+    paddingHorizontal: 16,
+    paddingBottom: 18,
+    color: "#9CA3AF",
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: "center",
+  },
+});

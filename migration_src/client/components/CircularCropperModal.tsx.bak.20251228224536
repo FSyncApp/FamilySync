@@ -1,0 +1,399 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Modal,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  LayoutChangeEvent,
+  PanResponder,
+  Animated,
+  Platform,
+} from "react-native";
+import * as ImageManipulator from "expo-image-manipulator";
+
+/**
+ * Phase 2.1.2o — Cropper: restore taps + explicit back, keep no-swipe
+ *
+ * Fixes:
+ *  - Previous 2.1.2n added a global capture PanResponder that swallowed ALL touches (buttons + image).
+ *  - This patch removes that capture layer and relies on a true fullScreen Modal (non-sheet) to prevent swipe dismiss.
+ *  - Keeps Animated drag/pinch smoothness.
+ *  - Adds an explicit "Back" button (in addition to Cancel/Done semantics) since swipe-dismiss is disabled.
+ *
+ * Canon:
+ *  - NO dimming overlay
+ *  - Clean circle guide
+ *  - Crop to circle bounding square
+ */
+
+export type CircularCropperModalProps = {
+  visible: boolean;
+  uri: string | null;
+  title?: string;
+  onCancel: () => void;
+  onDone: (resultUri: string) => void;
+};
+
+type ImgSize = { w: number; h: number };
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function makeEven(n: number) {
+  const i = Math.round(n);
+  return i % 2 === 0 ? i : i - 1;
+}
+
+export default function CircularCropperModal({ visible, uri, title, onCancel, onDone }: CircularCropperModalProps) {
+  const [frame, setFrame] = useState(320);
+  const [imgSize, setImgSize] = useState<ImgSize | null>(null);
+
+  // Smaller circle => finer selection
+  const circleRatio = 0.72;
+
+  // Animated values for buttery movement
+  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const scale = useRef(new Animated.Value(1)).current;
+
+  // Numeric refs for pinch math + crop export
+  const panRef = useRef({ x: 0, y: 0 });
+  const scaleRef = useRef(1);
+
+  const dragStart = useRef({ x: 0, y: 0 });
+  const pinchStart = useRef({
+    dist: 0,
+    scale: 1,
+    x: 0,
+    y: 0,
+    focalX: 0,
+    focalY: 0,
+    effScale: 1,
+  });
+
+  useEffect(() => {
+    if (!uri) return;
+    Image.getSize(
+      uri,
+      (w, h) => setImgSize({ w, h }),
+      () => setImgSize(null)
+    );
+  }, [uri]);
+
+  const hole = useMemo(() => Math.max(200, makeEven(frame * circleRatio)), [frame]);
+  const radius = hole / 2;
+
+  const baseScale = useMemo(() => {
+    if (!imgSize) return 1;
+    return Math.max(hole / imgSize.w, hole / imgSize.h);
+  }, [imgSize, hole]);
+
+  const BLEED = 22;
+
+  const clampTranslation = (nextX: number, nextY: number, eff: number) => {
+    if (!imgSize) return { x: nextX, y: nextY };
+
+    const scaledW = imgSize.w * eff;
+    const scaledH = imgSize.h * eff;
+
+    const maxX = Math.max(0, (scaledW - hole) / 2) + BLEED;
+    const maxY = Math.max(0, (scaledH - hole) / 2) + BLEED;
+
+    return { x: clamp(nextX, -maxX, maxX), y: clamp(nextY, -maxY, maxY) };
+  };
+
+  const applyPan = (x: number, y: number) => {
+    panRef.current = { x, y };
+    pan.setValue({ x, y });
+  };
+
+  const applyScale = (s: number) => {
+    scaleRef.current = s;
+    scale.setValue(s);
+  };
+
+  useEffect(() => {
+    if (!visible) return;
+    applyScale(1);
+    applyPan(0, 0);
+    pinchStart.current = { dist: 0, scale: 1, x: 0, y: 0, focalX: 0, focalY: 0, effScale: 1 };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, uri]);
+
+  const editorResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderTerminationRequest: () => false,
+
+        onPanResponderGrant: (evt) => {
+          dragStart.current = { ...panRef.current };
+
+          const touches = evt.nativeEvent.touches ?? [];
+          if (touches.length === 2) {
+            const [a, b] = touches;
+            const dx = a.pageX - b.pageX;
+            const dy = a.pageY - b.pageY;
+            const dist = Math.hypot(dx, dy);
+
+            const focalX = (a.locationX + b.locationX) / 2;
+            const focalY = (a.locationY + b.locationY) / 2;
+
+            pinchStart.current = {
+              dist,
+              scale: scaleRef.current,
+              x: panRef.current.x,
+              y: panRef.current.y,
+              focalX,
+              focalY,
+              effScale: baseScale * scaleRef.current,
+            };
+          } else {
+            pinchStart.current = {
+              dist: 0,
+              scale: scaleRef.current,
+              x: panRef.current.x,
+              y: panRef.current.y,
+              focalX: 0,
+              focalY: 0,
+              effScale: baseScale * scaleRef.current,
+            };
+          }
+        },
+
+        onPanResponderMove: (evt, gesture) => {
+          const touches = evt.nativeEvent.touches ?? [];
+
+          // pinch
+          if (touches.length === 2) {
+            const [a, b] = touches;
+            const dx = a.pageX - b.pageX;
+            const dy = a.pageY - b.pageY;
+            const dist = Math.hypot(dx, dy);
+
+            if (!pinchStart.current.dist) {
+              const focalX = (a.locationX + b.locationX) / 2;
+              const focalY = (a.locationY + b.locationY) / 2;
+              pinchStart.current = {
+                dist,
+                scale: scaleRef.current,
+                x: panRef.current.x,
+                y: panRef.current.y,
+                focalX,
+                focalY,
+                effScale: baseScale * scaleRef.current,
+              };
+              return;
+            }
+
+            const ratio = dist / pinchStart.current.dist;
+            const nextScale = clamp(pinchStart.current.scale * ratio, 1, 6);
+            const nextEff = baseScale * nextScale;
+
+            // Anchor to focal point
+            const c = frame / 2;
+            const fx = pinchStart.current.focalX;
+            const fy = pinchStart.current.focalY;
+
+            const startEff = pinchStart.current.effScale || baseScale * pinchStart.current.scale;
+            const scaleRatio = nextEff / startEff;
+
+            const nextXRaw = pinchStart.current.x + (fx - c) * (1 - scaleRatio);
+            const nextYRaw = pinchStart.current.y + (fy - c) * (1 - scaleRatio);
+
+            const clamped = clampTranslation(nextXRaw, nextYRaw, nextEff);
+            applyScale(nextScale);
+            applyPan(clamped.x, clamped.y);
+            return;
+          }
+
+          // drag
+          const eff = baseScale * scaleRef.current;
+          const nextXRaw = dragStart.current.x + gesture.dx;
+          const nextYRaw = dragStart.current.y + gesture.dy;
+
+          const clamped = clampTranslation(nextXRaw, nextYRaw, eff);
+          applyPan(clamped.x, clamped.y);
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [frame, hole, baseScale, imgSize]
+  );
+
+  const onLayoutFrame = (e: LayoutChangeEvent) => {
+    const w = Math.round(e.nativeEvent.layout.width);
+    if (w && Math.abs(w - frame) > 2) setFrame(w);
+  };
+
+  const zoomBy = (delta: number) => {
+    const nextScale = clamp(+((scaleRef.current + delta).toFixed(2)), 1, 6);
+    const nextEff = baseScale * nextScale;
+
+    const clamped = clampTranslation(panRef.current.x, panRef.current.y, nextEff);
+    applyScale(nextScale);
+    applyPan(clamped.x, clamped.y);
+  };
+
+  const handleDone = async () => {
+    if (!uri || !imgSize) return;
+
+    const eff = baseScale * scaleRef.current;
+    const cropSize = hole / eff;
+
+    const originX = imgSize.w / 2 - cropSize / 2 - panRef.current.x / eff;
+    const originY = imgSize.h / 2 - cropSize / 2 - panRef.current.y / eff;
+
+    const safe = {
+      originX: Math.max(0, Math.min(imgSize.w - cropSize, originX)),
+      originY: Math.max(0, Math.min(imgSize.h - cropSize, originY)),
+      width: Math.min(imgSize.w, cropSize),
+      height: Math.min(imgSize.h, cropSize),
+    };
+
+    try {
+      const result = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ crop: safe }],
+        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      onDone(result.uri);
+    } catch {
+      onDone(uri);
+    }
+  };
+
+  const top = Math.round((frame - hole) / 2);
+  const left = top;
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle={Platform.OS === "ios" ? "fullScreen" : "fullScreen"}
+      transparent={false}
+      onRequestClose={onCancel}
+      statusBarTranslucent={false}
+      supportedOrientations={["portrait"]}
+    >
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={onCancel} hitSlop={10}>
+            <Text style={styles.headerLink}>Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{title ?? "Position your photo"}</Text>
+          <TouchableOpacity onPress={handleDone} hitSlop={10}>
+            <Text style={styles.headerLink}>Done</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.editorWrap}>
+          <View style={styles.editor} onLayout={onLayoutFrame} {...editorResponder.panHandlers}>
+            {uri ? (
+              <Animated.Image
+                source={{ uri }}
+                style={[
+                  styles.image,
+                  {
+                    width: imgSize ? imgSize.w * baseScale : hole,
+                    height: imgSize ? imgSize.h * baseScale : hole,
+                    transform: [{ translateX: pan.x }, { translateY: pan.y }, { scale }],
+                  },
+                ]}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.placeholder}>
+                <Text style={styles.placeholderText}>No image</Text>
+              </View>
+            )}
+
+            <View
+              pointerEvents="none"
+              style={[styles.circleGuide, { width: hole, height: hole, borderRadius: radius, top, left }]}
+            />
+          </View>
+        </View>
+
+        <View style={styles.controls}>
+          <TouchableOpacity style={styles.zoomBtn} onPress={() => zoomBy(-0.25)} activeOpacity={0.85}>
+            <Text style={styles.zoomText}>−</Text>
+          </TouchableOpacity>
+          <Text style={styles.zoomLabel}>Zoom</Text>
+          <TouchableOpacity style={styles.zoomBtn} onPress={() => zoomBy(+0.25)} activeOpacity={0.85}>
+            <Text style={styles.zoomText}>+</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.hint}>Drag to position. Pinch to zoom, or use the buttons.</Text>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#0B0F19" },
+  header: {
+    paddingTop: 14,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerTitle: { color: "#FFFFFF", fontWeight: "900", fontSize: 16 },
+  headerLink: { color: "#FFFFFF", fontWeight: "800", fontSize: 15 },
+
+  editorWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
+  editor: {
+    width: "100%",
+    maxWidth: 340,
+    aspectRatio: 1,
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  image: { position: "absolute" },
+  placeholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
+  placeholderText: { color: "#9CA3AF", fontWeight: "800" },
+
+  circleGuide: {
+    position: "absolute",
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.9)",
+  },
+
+  controls: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+  },
+  zoomBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomText: { color: "#FFFFFF", fontWeight: "900", fontSize: 22, marginTop: -1 },
+  zoomLabel: { color: "#E5E7EB", fontWeight: "800" },
+
+  hint: {
+    paddingHorizontal: 16,
+    paddingBottom: 18,
+    color: "#9CA3AF",
+    fontSize: 12,
+    lineHeight: 16,
+    textAlign: "center",
+  },
+});

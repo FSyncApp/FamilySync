@@ -1,20 +1,19 @@
-import { Image, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View, Pressable } from "react-native";
+import { router } from "expo-router";
 
 export default function HomeScreen() {
   return (
     <View style={styles.container}>
-      <Image
-        source={require("../../assets/icon.png")}
-        style={styles.logo}
-        resizeMode="contain"
-      />
-
       <Text style={styles.title}>FamilySyncMigrate</Text>
 
       <Text style={styles.text}>
-        Clean runtime confirmed. Template assets removed; migration will proceed
-        in controlled slices.
+        Clean runtime confirmed. Next: open the legacy FamilySync UI inside this
+        clean project.
       </Text>
+
+      <Pressable style={styles.button} onPress={() => router.push("/legacy")}>
+        <Text style={styles.buttonText}>Open Legacy FamilySync UI</Text>
+      </Pressable>
     </View>
   );
 }
@@ -27,10 +26,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  logo: {
-    width: 96,
-    height: 96,
-  },
   title: {
     fontSize: 24,
     fontWeight: "700",
@@ -38,6 +33,16 @@ const styles = StyleSheet.create({
   text: {
     textAlign: "center",
     opacity: 0.8,
+    maxWidth: 320,
+  },
+  button: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  buttonText: {
+    fontSize: 16,
+    fontWeight: "600",
   },
 });
-

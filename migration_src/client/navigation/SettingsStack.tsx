@@ -1,0 +1,83 @@
+import React from "react";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+
+import SettingsScreen from "../screens/settings/SettingsScreen";
+import FamilyMembersScreen from "../screens/settings/FamilyMembersScreen";
+import ProfileScreen from "../screens/settings/ProfileScreen";
+import NotificationsScreen from "../screens/settings/NotificationsScreen";
+import HelpFeedbackScreen from "../screens/settings/HelpFeedbackScreen";
+import AboutScreen from "../screens/settings/AboutScreen";
+import AppearanceScreen from "../screens/settings/AppearanceScreen";
+import CustomizeHomeScreen from "../screens/settings/CustomizeHomeScreen";
+import LanguageScreen from "../screens/settings/LanguageScreen";
+import CurrencyScreen from "../screens/settings/CurrencyScreen";
+import PlaceholderScreen from "../screens/settings/PlaceholderScreen";
+import CalendarSettingsScreen from "../screens/settings/CalendarSettingsScreen";
+
+export type SettingsStackParamList = {
+  SettingsRoot: undefined;
+  CalendarSettings: undefined;
+  FamilyMembers: undefined;
+  Profile: undefined;
+  Notifications: undefined;
+  Privacy: undefined;
+  Appearance: undefined;
+  CustomizeHome: undefined;
+  Language: undefined;
+  Currency: undefined;
+  HelpFeedback: undefined;
+  About: undefined;
+  ComingSoon: { title: string; description?: string; bullets?: string[] };
+};
+
+const Stack = createNativeStackNavigator<SettingsStackParamList>();
+
+export default function SettingsStack() {
+  return (
+    <Stack.Navigator
+      initialRouteName="SettingsRoot"
+      screenOptions={{
+        headerBackTitleVisible: false,
+        headerShadowVisible: false,
+      }}
+    >
+      <Stack.Screen name="SettingsRoot" component={SettingsScreen} options={{ title: "Settings" }} />
+
+      <Stack.Screen
+        name="CalendarSettings"
+        component={CalendarSettingsScreen}
+        options={{ title: "Calendar settings" }}
+      />
+
+      <Stack.Screen name="FamilyMembers" component={FamilyMembersScreen} options={{ title: "Family & Members" }} />
+      <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Your Profile" }} />
+      <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: "Notifications" }} />
+
+      {/* Phase 1 placeholders */}
+      <Stack.Screen
+        name="Privacy"
+        component={PlaceholderScreen}
+        initialParams={{
+          title: "Privacy",
+          description:
+            "Privacy controls will be available once account and data features are enabled in a future phase.",
+          bullets: ["Data preferences", "Sharing controls", "Account privacy"],
+        }}
+        options={{ title: "Privacy" }}
+      />
+
+      <Stack.Screen name="Appearance" component={AppearanceScreen} options={{ title: "Appearance" }} />
+      <Stack.Screen name="CustomizeHome" component={CustomizeHomeScreen} options={{ title: "Customize Home" }} />
+      <Stack.Screen name="Language" component={LanguageScreen} options={{ title: "Language" }} />
+      <Stack.Screen name="Currency" component={CurrencyScreen} options={{ title: "Currency" }} />
+      <Stack.Screen name="HelpFeedback" component={HelpFeedbackScreen} options={{ title: "Help & Feedback" }} />
+      <Stack.Screen name="About" component={AboutScreen} options={{ title: "About" }} />
+
+      <Stack.Screen
+        name="ComingSoon"
+        component={PlaceholderScreen}
+        options={({ route }) => ({ title: route.params?.title ?? "Coming soon" })}
+      />
+    </Stack.Navigator>
+  );
+}

@@ -1,0 +1,89 @@
+import React from "react";
+import { View, Text, Image, StyleSheet, ViewStyle, TextStyle, ImageStyle } from "react-native";
+
+export type AvatarProps = {
+  /** Remote or local file URI (e.g. file://...) */
+  uri?: string | null;
+  /** Display name used to compute initials fallback */
+  name?: string | null;
+  /** Diameter in px */
+  size?: number;
+  /** Optional style override for the container */
+  style?: ViewStyle;
+  /** Optional accessibility label */
+  accessibilityLabel?: string;
+};
+
+function initialsFromName(name: string): string {
+  const cleaned = name.trim().replace(/\s+/g, " ");
+  if (!cleaned) return "?";
+  const parts = cleaned.split(" ").filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  const first = parts[0].slice(0, 1);
+  const last = parts[parts.length - 1].slice(0, 1);
+  return (first + last).toUpperCase();
+}
+
+export default function Avatar({ uri, name, size = 44, style, accessibilityLabel }: AvatarProps) {
+  const radius = Math.round(size / 2);
+  const hasUri = !!(uri && uri.trim());
+
+  return (
+    <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={accessibilityLabel ?? (name ? `${name} avatar` : "Avatar")}
+      style={[
+        styles.container,
+        { width: size, height: size, borderRadius: radius },
+        style,
+      ]}
+    >
+      {hasUri ? (
+        <Image
+          source={{ uri: uri as string }}
+          style={[styles.image, { width: size, height: size, borderRadius: radius }]}
+          resizeMode="cover"
+        />
+      ) : (
+        <View style={[styles.fallback, { borderRadius: radius }]}>
+          <Text style={[styles.initials, { fontSize: Math.max(12, Math.round(size * 0.34)) }]}>
+            {name ? initialsFromName(name) : "?"}
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+type S = {
+  container: ViewStyle;
+  image: ImageStyle;
+  fallback: ViewStyle;
+  initials: TextStyle;
+};
+
+const styles = StyleSheet.create<S>({
+  container: {
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E5E7EB", // neutral light gray
+  },
+  image: {
+    // sized inline
+  },
+  fallback: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E5E7EB",
+  },
+  initials: {
+    fontWeight: "700",
+    color: "#111827",
+    letterSpacing: 0.5,
+  },
+});

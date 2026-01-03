@@ -1,0 +1,199 @@
+import React, { useMemo, useState } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Alert, ScrollView } from "react-native";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import * as ImagePicker from "expo-image-picker";
+
+import type { RootStackParamList } from "../navigation/RootStack";
+import Avatar from "../components/Avatar";
+import { useIdentityImage } from "../data/identityImagesStore";
+
+type Props = NativeStackScreenProps<RootStackParamList, "AddChildren">;
+
+type ChildDraft = {
+  id: string;
+  name: string;
+  birthday: string;
+};
+
+function makeId() {
+  return `c_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+}
+
+function keyForChild(id: string) {
+  return `child:${id}`;
+}
+
+function ChildCard({
+  child,
+  index,
+  onUpdate,
+}: {
+  child: ChildDraft;
+  index: number;
+  onUpdate: (id: string, patch: Partial<ChildDraft>) => void;
+}) {
+  const image = useIdentityImage(keyForChild(child.id));
+  const hasPhoto = !!image.uri;
+
+  const pickPhoto = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Photos not allowed", "Please allow photo access in Settings to add a child photo.");
+        return;
+      }
+
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+
+      if (res.canceled) return;
+      const uri = res.assets?.[0]?.uri;
+      if (!uri) return;
+      await image.set(uri);
+    } catch {
+      Alert.alert("Couldn’t add photo", "Please try again.");
+    }
+  };
+
+  return (
+    <View style={styles.childCard}>
+      <Text style={styles.childTitle}>Child {index + 1}</Text>
+
+      <View style={styles.photoRow}>
+        <TouchableOpacity onPress={pickPhoto} activeOpacity={0.85} style={styles.photoTap} accessibilityRole="button">
+          <Avatar name={child.name || `Child ${index + 1}`} uri={image.uri} size={84} />
+          <View style={styles.photoBadge}>
+            <Text style={styles.photoBadgeText}>{hasPhoto ? "✎" : "+"}</Text>
+          </View>
+        </TouchableOpacity>
+
+        <View style={styles.photoCopy}>
+          <Text style={styles.photoTitle}>{hasPhoto ? "Photo" : "Add photo (optional)"}</Text>
+          <Text style={styles.photoHint}>Tap the circle to {hasPhoto ? "change" : "choose"} a photo.</Text>
+        </View>
+      </View>
+
+      <Text style={styles.label}>Name</Text>
+      <TextInput
+        value={child.name}
+        onChangeText={(t) => onUpdate(child.id, { name: t })}
+        placeholder="e.g. Isla"
+        autoCapitalize="words"
+        style={styles.input}
+      />
+
+      <Text style={styles.label}>Birthday (optional)</Text>
+      <TextInput
+        value={child.birthday}
+        onChangeText={(t) => onUpdate(child.id, { birthday: t })}
+        placeholder="YYYY-MM-DD"
+        autoCapitalize="none"
+        style={styles.input}
+      />
+    </View>
+  );
+}
+
+export default function AddChildrenScreen({ navigation }: Props) {
+  const [children, setChildren] = useState<ChildDraft[]>([{ id: makeId(), name: "", birthday: "" }]);
+
+  const canContinue = useMemo(() => true, [children]);
+
+  const addChild = () => setChildren((prev) => [...prev, { id: makeId(), name: "", birthday: "" }]);
+
+  const onUpdate = (id: string, patch: Partial<ChildDraft>) => {
+    setChildren((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  };
+
+  const onContinue = () => {
+    if (!canContinue) return;
+    navigation.navigate("InviteAdults");
+  };
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Children</Text>
+      <Text style={styles.subtitle}>Add children (optional). You can edit this later in Settings → Family & Members.</Text>
+
+      {children.map((c, idx) => (
+        <ChildCard key={c.id} child={c} index={idx} onUpdate={onUpdate} />
+      ))}
+
+      <TouchableOpacity style={styles.addAnother} onPress={addChild} activeOpacity={0.85}>
+        <Text style={styles.addAnotherText}>+ Add another child</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.cta, !canContinue && { opacity: 0.45 }]}
+        onPress={onContinue}
+        disabled={!canContinue}
+        activeOpacity={0.85}
+      >
+        <Text style={styles.ctaText}>Continue</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.small}>Photos are stored locally on this device in Phase 2.1.</Text>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { padding: 16, paddingTop: 24, paddingBottom: 28, backgroundColor: "#FFFFFF" },
+  title: { fontSize: 28, fontWeight: "900", color: "#111827" },
+  subtitle: { marginTop: 8, fontSize: 15, lineHeight: 20, color: "#4B5563" },
+
+  childCard: {
+    marginTop: 14,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#E5E7EB",
+  },
+  childTitle: { fontSize: 16, fontWeight: "900", color: "#111827" },
+
+  photoRow: { marginTop: 12, flexDirection: "row", alignItems: "center", gap: 12 },
+  photoTap: { width: 84, height: 84, alignItems: "center", justifyContent: "center" },
+  photoBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+  photoBadgeText: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", marginTop: -1 },
+
+  photoCopy: { flex: 1, minHeight: 84, justifyContent: "center" },
+  photoTitle: { fontSize: 14, fontWeight: "900", color: "#111827" },
+  photoHint: { marginTop: 4, fontSize: 12, lineHeight: 16, color: "#6B7280" },
+
+  label: { marginTop: 12, fontSize: 13, fontWeight: "800", color: "#6B7280" },
+  input: {
+    marginTop: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#D1D5DB",
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    color: "#111827",
+  },
+
+  addAnother: { marginTop: 14, paddingVertical: 12, alignItems: "center" },
+  addAnotherText: { fontSize: 15, fontWeight: "800", color: "#111827" },
+
+  cta: { marginTop: 10, borderRadius: 14, backgroundColor: "#111827", paddingVertical: 14, alignItems: "center" },
+  ctaText: { color: "#FFFFFF", fontWeight: "900", fontSize: 16 },
+
+  small: { marginTop: 14, fontSize: 12, lineHeight: 16, color: "#6B7280" },
+});

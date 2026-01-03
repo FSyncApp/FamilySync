@@ -1,0 +1,136 @@
+import React, { useMemo, useState } from "react";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert } from "react-native";
+import type { NativeStackScreenProps } from "@react-navigation/native-stack";
+import * as ImagePicker from "expo-image-picker";
+
+import type { RootStackParamList } from "../navigation/RootStack";
+import Avatar from "../components/Avatar";
+import { useIdentityImage } from "../data/identityImagesStore";
+
+type Props = NativeStackScreenProps<RootStackParamList, "YourDetails">;
+
+export default function YourDetailsScreen({ navigation }: Props) {
+  const [name, setName] = useState("");
+  const image = useIdentityImage("profile:self");
+
+  const canContinue = useMemo(() => name.trim().length >= 2, [name]);
+
+  const onAddPhoto = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Photos not allowed", "Please allow photo access in Settings to add a profile photo.");
+        return;
+      }
+
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.85,
+      });
+
+      if (res.canceled) return;
+      const uri = res.assets?.[0]?.uri;
+      if (!uri) return;
+      await image.set(uri);
+    } catch {
+      Alert.alert("Couldn’t add photo", "Please try again.");
+    }
+  };
+
+  const onContinue = () => {
+    if (!canContinue) return;
+    navigation.navigate("FamilyName");
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Your details</Text>
+      <Text style={styles.subtitle}>Add your name and an optional photo. You can edit this later in Settings.</Text>
+
+      <View style={styles.photoRow}>
+        <Avatar name={name || "You"} uri={image.uri} size={72} />
+        <TouchableOpacity style={styles.photoButton} onPress={onAddPhoto}>
+          <Text style={styles.photoText}>{image.uri ? "Change profile photo" : "Add profile photo (optional)"}</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.label}>Your name</Text>
+      <TextInput
+        value={name}
+        onChangeText={setName}
+        placeholder="e.g. Jordan Taylor"
+        autoCapitalize="words"
+        style={styles.input}
+      />
+
+      <TouchableOpacity
+        style={[styles.cta, !canContinue && { opacity: 0.45 }]}
+        onPress={onContinue}
+        disabled={!canContinue}
+      >
+        <Text style={styles.ctaText}>Continue</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.small}>
+        Photos are stored locally on this device in Phase 2.1. Family syncing will be enabled in a later phase.
+      </Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, padding: 16, paddingTop: 24, backgroundColor: "#FFFFFF" },
+  title: { fontSize: 28, fontWeight: "900", color: "#111827" },
+  subtitle: { marginTop: 8, fontSize: 15, lineHeight: 20, color: "#4B5563" },
+
+  photoRow: { marginTop: 16, flexDirection: "row", alignItems: "center", gap: 14 },
+  photoCircle: {
+    width: 94,
+    height: 94,
+    borderRadius: 47,
+    backgroundColor: "#F3F4F6",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoBadge: {
+    position: "absolute",
+    right: 4,
+    bottom: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+  },
+  photoBadgeText: { color: "#FFFFFF", fontSize: 16, fontWeight: "800", marginTop: -1 },
+  photoTitle: { fontSize: 15, fontWeight: "800", color: "#111827" },
+  photoHint: { marginTop: 2, fontSize: 13, color: "#6B7280" },
+
+  label: { marginTop: 18, fontSize: 13, fontWeight: "800", color: "#6B7280" },
+  input: {
+    marginTop: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#D1D5DB",
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    fontSize: 16,
+    color: "#111827",
+  },
+
+  cta: {
+    marginTop: 18,
+    borderRadius: 14,
+    backgroundColor: "#111827",
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  ctaText: { color: "#FFFFFF", fontWeight: "900", fontSize: 16 },
+
+  small: { marginTop: 14, fontSize: 12, lineHeight: 16, color: "#6B7280" },
+});

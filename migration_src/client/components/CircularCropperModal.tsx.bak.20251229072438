@@ -1,0 +1,300 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Modal,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Image,
+  LayoutChangeEvent,
+  PanResponder,, Dimensions } from "react-native";
+import * as ImageManipulator from "expo-image-manipulator";
+
+/**
+ * Circular crop overlay editor (Phase 2.1):
+ * - Shows a circular mask
+ * - Allows drag to position
+ * - Allows zoom via +/- buttons (simple + reliable)
+ * - Outputs a square-cropped image; displayed as circle elsewhere
+ *
+ * NOTE: This is intentionally simple (no pinch gesture dependency) for stability.
+ */
+
+export type CircularCropperModalProps = {
+  visible: boolean;
+  uri: string | null;
+  title?: string;
+  onCancel: () => void;
+  onDone: (resultUri: string) => void;
+};
+
+type ImgSize = { w: number; h: number };
+
+export default function CircularCropperModal({ visible, uri, title, onCancel, onDone }: CircularCropperModalProps) {
+  
+  const win = Dimensions.get("window");
+  const guideSize = Math.min(win.width, win.height) - 140;
+const [frame, setFrame] = useState(260); // square editor size (px)
+  const [imgSize, setImgSize] = useState<ImgSize | null>(null);
+
+  // User-controlled transform
+  const [userScale, setUserScale] = useState(1);
+  const [tx, setTx] = useState(0);
+  const [ty, setTy] = useState(0);
+
+  // For dragging
+  const dragStart = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    if (!uri) return;
+    Image.getSize(
+      uri,
+      (w, h) => setImgSize({ w, h }),
+      () => setImgSize(null)
+    );
+  }, [uri]);
+
+  // Reset when opened/new uri
+  useEffect(() => {
+    if (!visible) return;
+    setUserScale(1);
+    setTx(0);
+    setTy(0);
+  }, [visible, uri]);
+
+  const baseScale = useMemo(() => {
+    if (!imgSize) return 1;
+    // cover the square frame
+    return Math.max(frame / imgSize.w, frame / imgSize.h);
+  }, [imgSize, frame]);
+
+  const effectiveScale = baseScale * userScale;
+
+  // Clamp translation so image always covers frame
+  const clampTranslation = (nextTx: number, nextTy: number) => {
+    if (!imgSize) return { x: nextTx, y: nextTy };
+    const scaledW = imgSize.w * effectiveScale;
+    const scaledH = imgSize.h * effectiveScale;
+
+    // image is centered; allow moving within bounds
+    const maxX = Math.max(0, (scaledW - frame) / 2);
+    const maxY = Math.max(0, (scaledH - frame) / 2);
+
+    const x = Math.max(-maxX, Math.min(maxX, nextTx));
+    const y = Math.max(-maxY, Math.min(maxY, nextTy));
+    return { x, y };
+  };
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: () => true,
+        onPanResponderGrant: () => {
+          dragStart.current = { x: tx, y: ty };
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          const next = clampTranslation(dragStart.current.x + gesture.dx, dragStart.current.y + gesture.dy);
+          setTx(next.x);
+          setTy(next.y);
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tx, ty, imgSize, effectiveScale, frame]
+  );
+
+  const onLayoutFrame = (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    // keep it square based on actual measured width
+    if (w && Math.abs(w - frame) > 2) setFrame(Math.round(w));
+  };
+
+  const zoomBy = (delta: number) => {
+    const nextScale = Math.max(1, Math.min(3, +(userScale + delta).toFixed(2)));
+    setUserScale(nextScale);
+    // re-clamp after scale change
+    const next = clampTranslation(tx, ty);
+    setTx(next.x);
+    setTy(next.y);
+  };
+
+  const handleDone = async () => {
+    if (!uri || !imgSize) return;
+
+    // Compute crop rect in original image coordinates
+    // Frame center corresponds to image center + translation (in frame px)
+    const cropSize = frame / effectiveScale;
+
+    const originX = imgSize.w / 2 - cropSize / 2 - tx / effectiveScale;
+    const originY = imgSize.h / 2 - cropSize / 2 - ty / effectiveScale;
+
+    const safe = {
+      originX: Math.max(0, Math.min(imgSize.w - cropSize, originX)),
+      originY: Math.max(0, Math.min(imgSize.h - cropSize, originY)),
+      width: Math.min(imgSize.w, cropSize),
+      height: Math.min(imgSize.h, cropSize),
+    };
+
+    try {
+      const result = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ crop: safe }],
+        { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
+      );
+      onDone(result.uri);
+    } catch {
+      // If crop fails, fall back to the original uri
+      onDone(uri);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onCancel}>
+      <View style={styles.container}>
+        
+        {/* FSYNC_CIRCLE_GUIDE_OVERLAY */}
+        <View pointerEvents="none" style={styles.circleGuideWrap}>
+          <View style={[styles.circleGuide, { width: guideSize, height: guideSize, borderRadius: guideSize / 2 }]} />
+        </View>
+<View style={styles.header}>
+          <TouchableOpacity onPress={onCancel} hitSlop={10}>
+            <Text style={styles.headerLink}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>{title ?? "Adjust photo"}</Text>
+          <TouchableOpacity onPress={handleDone} hitSlop={10}>
+            <Text style={styles.headerLink}>Done</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.editorWrap}>
+          <View style={styles.editor} onLayout={onLayoutFrame} {...panResponder.panHandlers}>
+            {uri ? (
+              <Image
+                source={{ uri }}
+                style={[
+                  styles.image,
+                  {
+                    width: imgSize ? imgSize.w * effectiveScale : frame,
+                    height: imgSize ? imgSize.h * effectiveScale : frame,
+                    transform: [{ translateX: tx }, { translateY: ty }],
+                  },
+                ]}
+                resizeMode="cover"
+              />
+            ) : (
+              <View style={styles.placeholder}>
+                <Text style={styles.placeholderText}>No image</Text>
+              </View>
+            )}
+
+            {/* darken outside circle */}
+            <View pointerEvents="none" style={styles.overlay}>
+              <View style={styles.overlayInner}>
+                <View style={styles.overlayRow}>
+                  <View style={styles.overlaySide} />
+                  <View style={styles.circleCutout} />
+                  <View style={styles.overlaySide} />
+                </View>
+                <View style={styles.overlayBottom} />
+              </View>
+
+              <View pointerEvents="none" style={styles.circleStroke} />
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.controls}>
+          <TouchableOpacity style={styles.zoomBtn} onPress={() => zoomBy(-0.15)} activeOpacity={0.85}>
+            <Text style={styles.zoomText}>−</Text>
+          </TouchableOpacity>
+          <Text style={styles.zoomLabel}>Zoom</Text>
+          <TouchableOpacity style={styles.zoomBtn} onPress={() => zoomBy(+0.15)} activeOpacity={0.85}>
+            <Text style={styles.zoomText}>+</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.hint}>
+          Drag to position. Use zoom buttons to scale. (iOS photo picker crop is square; FamilySync shows photos as circles.)
+        </Text>
+      </View>
+    </Modal>
+  );
+}
+
+const OVERLAY = "rgba(0,0,0,0.55)";
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: "#0B0F19" },
+  header: {
+    paddingTop: 14,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  headerTitle: { color: "#FFFFFF", fontWeight: "900", fontSize: 16 },
+  headerLink: { color: "#FFFFFF", fontWeight: "800", fontSize: 15 },
+
+  editorWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 16 },
+  editor: {
+    width: "100%",
+    maxWidth: 320,
+    aspectRatio: 1,
+    borderRadius: 18,
+    overflow: "hidden",
+    backgroundColor: "#111827",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  image: {
+    position: "absolute",
+  },
+  placeholder: { width: "100%", height: "100%", alignItems: "center", justifyContent: "center" },
+  placeholderText: { color: "#9CA3AF", fontWeight: "800" },
+
+  overlay: { ...StyleSheet.absoluteFillObject },
+  overlayInner: { flex: 1, backgroundColor: OVERLAY, justifyContent: "center" },
+
+  overlayRow: { flexDirection: "row", alignItems: "center", justifyContent: "center" },
+  overlaySide: { flex: 1, height: 260, backgroundColor: OVERLAY },
+  circleCutout: {
+    width: 260,
+    height: 260,
+    borderRadius: 130,
+    backgroundColor: "transparent",
+  },
+  overlayBottom: { height: 9999, backgroundColor: OVERLAY },
+
+  circleStroke: {
+    position: "absolute",
+    left: "50%",
+    top: "50%",
+    width: 260,
+    height: 260,
+    marginLeft: -130,
+    marginTop: -130,
+    borderRadius: 130,
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.85)",
+  },
+
+  controls: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 14,
+  },
+  zoomBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomText: { color: "#FFFFFF", fontWeight: "900", fontSize: 22, marginTop: -1 },
+  zoomLabel: { color: "#E5E7EB", fontWeight: "800" },
+
+  hint: { paddingHorizontal: 16, paddingBottom: 18, color: "#9CA3AF", fontSize: 12, lineHeight: 16, textAlign: "center" },
+});
