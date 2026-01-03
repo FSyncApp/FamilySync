@@ -157,7 +157,13 @@ export default function HomeScreen() {
   const onMenuPress = () => router.push("/legacy");
 
   const onShortcutPress = (item: ShortcutItem) => {
-    // Bills is now Router-native.
+    // Calendar is now Router-native.
+    if (item.label === "Calendar") {
+      router.push("/calendar");
+      return;
+    }
+
+// Bills is now Router-native.
     if (item.label === "Bills") {
       router.push("/bills");
       return;
