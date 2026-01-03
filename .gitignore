@@ -1,108 +1,25 @@
-# =========================
 # Dependencies
-# =========================
 node_modules/
 
-# =========================
-# Expo
-# =========================
+# Expo / React Native
 .expo/
-expo-env.d.ts
 dist/
 web-build/
-.expo-shared/
 
-# =========================
-# Metro
-# =========================
-.metro-health-check*
-
-# =========================
-# iOS / Xcode
-# =========================
-ios/Pods/
-ios/build/
-ios/DerivedData/
-ios/*.xcworkspace/xcuserdata/
-ios/*.xcodeproj/xcuserdata/
-ios/.xcode.env*.local
-ios/**/profile
-ios/**/build
-
-# =========================
-# Android
-# =========================
-android/.gradle/
-android/build/
-android/app/build/
-android/local.properties
-
-# =========================
-# Debug logs
-# =========================
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-pnpm-debug.log*
-
-# =========================
 # macOS
-# =========================
 .DS_Store
+*.DS_Store
 
-# =========================
-# Certificates / secrets
-# =========================
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-*.pem
-
-# =========================
-# Environment files
-# =========================
-.env
-.env.*
-.env*.local
-
-# =========================
-# TypeScript
-# =========================
-*.tsbuildinfo
-
-# =========================
-# Misc
-# =========================
-_archive/
-app-example
-
-# pnpm
-pnpm-debug.log*
-
-# iOS / Xcode noise
-ios/*.xcuserstate
-ios/**/xcuserdata/
-ios/.xcode.env*.local
-ios/*.lock
-ios/* 2*/
-ios/* 2.xcworkspace/
-
-# macOS junk
-**/.DS_Store
-
-# accidental duplicates
-ios/* 2*
-ios/Podfile 2.lock
-ios/Podfile.properties 2.json
-
-
-# Local patch artifacts
+# Patch workflow
+_patch_backup/
 _patches/
 
-# Local editor/patch backups
-*.bak.*
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Local editor/patch backups
-*.bak.*
+# Env
+.env
+.env.*
