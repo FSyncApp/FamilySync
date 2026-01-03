@@ -221,9 +221,10 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 24 },
 
   headerRow: {
+    position: "relative",
     flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 12,
     gap: 12,
   },
@@ -232,6 +233,9 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 14, lineHeight: 18, fontWeight: "600", color: vars.inkMuted },
 
   addBtn: {
+    position: "absolute",
+    right: 0,
+    top: 0,
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
