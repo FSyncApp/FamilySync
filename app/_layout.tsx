@@ -23,6 +23,7 @@ export default function RootLayout() {
         <Stack.Screen name="bills/form" options={{ headerShown: false }} />
         <Stack.Screen name="calendar" options={{ headerShown: false }} />
         <Stack.Screen name="tasks" options={{ headerShown: false }} />
+        <Stack.Screen name="messages" options={{ headerShown: false }} />
 
         {/* Legacy container screen (with banner) */}
         <Stack.Screen name="legacy" options={{ headerShown: false }} />

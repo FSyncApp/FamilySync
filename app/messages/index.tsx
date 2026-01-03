@@ -1,6 +1,7 @@
 import React from "react";
 import { NavigationContainer, type InitialState } from "@react-navigation/native";
 import { NavigationIndependentTree } from "@react-navigation/native";
+import { Stack } from "expo-router";
 
 import MainTabs from "../../migration_src/client/navigation/MainTabs";
 
@@ -13,7 +14,7 @@ function buildInitialState(): InitialState {
     stale: false,
     type: "tab",
     key: "legacy-tabs",
-    index: 2,
+    index: 2, // Messages tab (Home=0, Calendar=1, Messages=2, Settings=3)
     routeNames: ["Home", "Calendar", "Messages", "Settings"],
     routes: [
       { key: "legacy-home", name: "Home" },
@@ -26,10 +27,13 @@ function buildInitialState(): InitialState {
 
 export default function MessagesRoute() {
   return (
-    <NavigationIndependentTree>
-      <NavigationContainer initialState={buildInitialState()}>
-        <MainTabs />
-      </NavigationContainer>
-    </NavigationIndependentTree>
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <NavigationIndependentTree>
+        <NavigationContainer initialState={buildInitialState()}>
+          <MainTabs />
+        </NavigationContainer>
+      </NavigationIndependentTree>
+    </>
   );
 }
