@@ -62,6 +62,14 @@ export default function TabLayout() {
           ),
         }}
       />
+
+      {/* Hidden route: Birthdays (keeps bottom tabs visible) */}
+      <Tabs.Screen
+        name="birthdays"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

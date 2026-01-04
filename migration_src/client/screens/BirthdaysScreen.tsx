@@ -98,7 +98,7 @@ export default function BirthdaysScreen() {
     return formatDisplayDM(b._next);
   };
 
-  const renderRow = (b: any) => {
+  const renderRow = (b: any, i: number) => {
     const turnsLabel = typeof b._turns === "number" ? `Turns ${b._turns}` : null;
 
     return (
